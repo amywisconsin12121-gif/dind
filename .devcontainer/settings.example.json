@@ -1,0 +1,7 @@
+{
+  "CPU_CORES": "auto",
+  "RAM_SIZE": "auto",
+  "DISK_SIZE": "keep",
+  "DISK_CACHE": "none",
+  "DISK_IO": "native"
+}

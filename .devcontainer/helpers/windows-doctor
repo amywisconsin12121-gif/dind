@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+source "${WINDOWS_WORKSPACE:-$(cat /usr/local/lib/windows-dind/workspace)}/.devcontainer/helpers/common.sh"
+python3 "$workspace/.devcontainer/windows-config.py" --resources
+python3 "$workspace/.devcontainer/windows-config.py" --check-kvm || true
+df -h "$storage" /tmp
+
+if docker info >/dev/null 2>&1 && [[ -s "$compose_file" ]]; then
+    compose ps --all
+    compose logs --tail 40 windows
+    if [[ $(docker inspect --format '{{.State.Running}}' windows 2>/dev/null) == true ]]; then
+        docker exec windows sh -c 'pgrep -a qemu-system || true'
+        docker exec windows python3 -c '
+import os,socket
+host=os.environ.get("IP", "20.20.20.21")
+try:
+    with socket.create_connection((host,3389), timeout=3):
+        print("Guest RDP TCP listener is reachable; a client login is still needed to validate authentication.")
+except OSError as e:
+    print("Guest RDP is not ready:", e)
+'
+    fi
+fi
+if tailscale status --json >/dev/null 2>&1; then
+    tailscale status
+    tailscale ip --4 || true
+fi

@@ -6,6 +6,16 @@ It installs Tailscale which allows you to Remote Desktop Protocol (RDP) into Win
 
 It is based on the [dockur/windows](https://github.com/dockur/windows) repository but contains customizations and optimizations for GitHub Codespaces.
 
+## Repaired Codespaces setup
+
+Create the Codespace from **your fork and the branch containing these fixes**. Choose the largest machine offered to your account that fits your budget. The old badge and CLI examples pointed to ItzLevvie's upstream repository, so they did not use changes in a fork.
+
+Once the terminal opens, run `start`. This checks working KVM acceleration, downloads and verifies ItzLevvie's existing image if needed, and boots Windows in the background. Open forwarded port **8006** to finish Windows setup. Then run `start-tailscale` and sign in; use the displayed Tailscale IPv4 address in your Remote Desktop client.
+
+For passwords, Windows RDP configuration, an alternative local TCP tunnel, performance settings, and recovery instructions, see [the setup guide](docs/codespaces-setup.md). Run `windows-doctor` to collect VM, KVM, storage, and RDP diagnostics. [The investigation report](docs/investigation.md) explains the original failures and exactly what was tested.
+
+Windows data stays in `windows/` across devcontainer rebuilds. A VM that was running resumes when the Codespace starts; `stop` disables that automatic resume. The first image import needs about **19 GiB of staging space** plus space for the sparse raw disk in the workspace. The script checks both filesystems before proceeding.
+
 > [!CAUTION]
 > This repository should be used for development and testing purposes only. <br>
 > I am not responsible for any issues such as account suspensions or data loss.
@@ -45,7 +55,9 @@ Below are images of Windows 11 running on GitHub Codespaces:
 
 Click on the button below:
 
-[![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://codespaces.new/ItzLevvie/dind?machine=standardLinux32gb)
+[![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://github.com/codespaces/new)
+
+Select your fork, the repaired branch, and your desired machine size.
 
 > [!NOTE]
 > See [Commands](#commands) for a full list of available commands.
@@ -55,7 +67,7 @@ Click on the button below:
 ### Using the CLI version of GitHub (alternative)
 
 1) Install [GitHub CLI](https://github.com/cli/cli/releases/latest)
-2) Type `gh codespace create --idle-timeout 4h --retention-period 720h --repo ItzLevvie/dind --machine standardLinux32gb` in Command Prompt or PowerShell.
+2) Type `gh codespace create --idle-timeout 4h --retention-period 720h --repo YOUR_GITHUB_USERNAME/dind --branch YOUR_FIXED_BRANCH --machine standardLinux32gb` in Command Prompt or PowerShell. Replace the repository and branch with your fork and repaired branch.
 3) This will allow you to create the GitHub Codespaces based on the files from this repository:
     ```
     C:\Users\codespaces>gh codespace create --idle-timeout 4h --retention-period 720h --repo ItzLevvie/dind --machine xLargePremiumLinux
@@ -109,11 +121,12 @@ This repository contains a few helper scripts[^3] to get you started.
 | start | Starts Windows 11 |
 | stop | Stops Windows 11 |
 | restart | Restarts Windows 11 |
-| kill | Forcefully stops Windows 11 |
-| reset | Resets Windows 11 to a clean state <br><br> Note: This will only work if the `/tmp/github/windows/data.img` file exists |
+| /usr/local/bin/kill | Forcefully stops Windows 11; the absolute path avoids Bash's built-in kill |
+| reset --yes | Stops the VM and imports a clean copy of the original image, replacing Windows changes |
 | remove | Removes the `windows` container |
 | rebuild | Performs a full rebuild of your GitHub Codespaces |
 | start-tailscale | Starts Tailscale |
+| windows-doctor | Reports actual resource limits, KVM availability, VM logs, and the guest RDP listener |
 
 ## Frequently Asked Questions (FAQ)
 

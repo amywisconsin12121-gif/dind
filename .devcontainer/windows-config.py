@@ -1,0 +1,190 @@
+#!/usr/bin/env python3
+"""Probe usable KVM and generate resource-aware Compose configuration."""
+import argparse
+import fcntl
+import json
+import math
+import os
+from pathlib import Path
+import re
+import stat
+import subprocess
+import sys
+
+MIB = 1024**2
+GIB = 1024**3
+IMAGE = "ghcr.io/dockur/windows:6.05@sha256:0cff9eb0e7aee9953e55bc682852ca4fdca233145a58ae1ec94f0b0c01a2ed30"
+
+
+def workspace_path():
+    return Path(os.environ.get("WINDOWS_WORKSPACE", Path(__file__).resolve().parent.parent)).resolve()
+
+
+def cgroup_paths(root):
+    """Include the current cgroup and its ancestors, where mounted/visible."""
+    paths = [root]
+    try:
+        for line in Path("/proc/self/cgroup").read_text().splitlines():
+            if line.startswith("0::"):
+                current = (root / line[3:].lstrip("/")).resolve()
+                if current.is_relative_to(root.resolve()) and current.exists():
+                    while current != root.resolve():
+                        paths.append(current)
+                        current = current.parent
+    except OSError:
+        pass
+    return paths
+
+
+def resources(cgroup_root=Path("/sys/fs/cgroup"), meminfo=Path("/proc/meminfo")):
+    info = {}
+    for line in meminfo.read_text().splitlines():
+        key, value = line.split(":", 1)
+        info[key] = int(value.split()[0]) * 1024
+    total = info["MemTotal"]
+    available = info.get("MemAvailable", info.get("MemFree", 0))
+    cpus = len(os.sched_getaffinity(0))
+    for path in cgroup_paths(cgroup_root):
+        try:
+            limit = int((path / "memory.max").read_text().strip())
+            current = int((path / "memory.current").read_text().strip())
+            total = min(total, limit)
+            try:
+                memory_stats = dict(line.split() for line in (path / "memory.stat").read_text().splitlines())
+                reclaimable = int(memory_stats.get("inactive_file", "0"))
+            except OSError:
+                reclaimable = 0
+            available = min(available, max(0, limit - current + reclaimable))
+        except (OSError, ValueError):
+            pass
+        try:
+            quota, period = (path / "cpu.max").read_text().split()
+            if quota != "max":
+                cpus = min(cpus, max(1, math.ceil(int(quota) / int(period))))
+        except (OSError, ValueError, ZeroDivisionError):
+            pass
+    # Legacy cgroup v1 hosts.
+    try:
+        limit = int((cgroup_root / "memory/memory.limit_in_bytes").read_text())
+        usage = int((cgroup_root / "memory/memory.usage_in_bytes").read_text())
+        total = min(total, limit)
+        available = min(available, max(0, limit - usage))
+    except (OSError, ValueError):
+        pass
+    try:
+        quota = int((cgroup_root / "cpu/cpu.cfs_quota_us").read_text())
+        period = int((cgroup_root / "cpu/cpu.cfs_period_us").read_text())
+        if quota > 0:
+            cpus = min(cpus, max(1, math.ceil(quota / period)))
+    except (OSError, ValueError, ZeroDivisionError):
+        pass
+    budget = min(total - max(2 * GIB, total // 10), available - 512 * MIB)
+    return {"cpus": cpus, "total": total, "available": available, "ram_mib": budget // MIB}
+
+
+def check_kvm(device=Path("/dev/kvm")):
+    try:
+        with device.open("rb+", buffering=0) as kvm:
+            if fcntl.ioctl(kvm.fileno(), 0xAE00, 0) != 12:
+                raise ValueError("unsupported KVM API")
+            vm = fcntl.ioctl(kvm.fileno(), 0xAE01, 0)
+            os.close(vm)
+    except (OSError, ValueError) as error:
+        raise ValueError(
+            f"KVM cannot create a VM: {error}. Hardware acceleration must be exposed by the Codespaces host. "
+            "Rebuilding scripts or using KVM=N cannot provide high performance. "
+            "Check windows-doctor and the Codespace machine's nested-virtualization support."
+        ) from error
+    tun = Path("/dev/net/tun")
+    if not tun.exists() or not stat.S_ISCHR(tun.stat().st_mode):
+        raise ValueError("/dev/net/tun is unavailable; a privileged devcontainer is required for VM networking.")
+    print("KVM API and VM creation succeeded; TUN is available.")
+
+
+def size_bytes(value):
+    match = re.fullmatch(r"([1-9][0-9]*)([MG])", str(value).upper())
+    if not match:
+        raise ValueError(f"Invalid size {value!r}; use a whole number followed by M or G.")
+    return int(match[1]) * (MIB if match[2] == "M" else GIB)
+
+
+def generate(workspace, limits):
+    storage = workspace / "windows"
+    settings_file = storage / "settings.json"
+    settings = json.loads(settings_file.read_text()) if settings_file.exists() else {}
+    allowed = {"CPU_CORES", "RAM_SIZE", "DISK_SIZE", "DISK_CACHE", "DISK_IO", "WINDOWS_IMAGE"}
+    if not isinstance(settings, dict) or set(settings) - allowed:
+        raise ValueError("settings.json must be an object containing only documented settings.")
+
+    def setting(name, default):
+        return os.environ.get(name, settings.get(name, default))
+
+    cpu_value = setting("CPU_CORES", "auto")
+    cpus = limits["cpus"] if cpu_value == "auto" else int(cpu_value)
+    if not 1 <= cpus <= limits["cpus"]:
+        raise ValueError(f"CPU_CORES must be between 1 and {limits['cpus']} on this machine.")
+    ram_value = setting("RAM_SIZE", "auto")
+    ram_mib = limits["ram_mib"] if ram_value == "auto" else size_bytes(ram_value) // MIB
+    if not 4096 <= ram_mib <= limits["ram_mib"]:
+        raise ValueError(f"RAM_SIZE must fit between 4096M and {limits['ram_mib']}M with host headroom. Free memory or select a larger Codespace.")
+    disk = storage / "data.img"
+    virtual_size = disk.stat().st_size
+    if virtual_size == 0:
+        raise ValueError("The Windows raw disk is empty.")
+    disk_size = setting("DISK_SIZE", "keep")
+    if disk_size == "keep":
+        disk_size = f"{math.ceil(virtual_size / MIB)}M"
+    elif size_bytes(disk_size) < virtual_size:
+        raise ValueError("DISK_SIZE cannot shrink the existing Windows disk.")
+    cache = setting("DISK_CACHE", "none")
+    io = setting("DISK_IO", "native")
+    if cache not in ("none", "writeback", "directsync", "writethrough") or io not in ("native", "threads", "io_uring"):
+        raise ValueError("Unsupported DISK_CACHE or DISK_IO setting.")
+    if io == "native" and cache not in ("none", "directsync"):
+        raise ValueError("DISK_IO=native requires DISK_CACHE=none or directsync; use threads with writeback.")
+    environment = {
+        "CPU_CORES": str(cpus), "RAM_SIZE": f"{ram_mib}M", "RAM_CHECK": "Y",
+        "DISK_SIZE": str(disk_size), "DISK_FMT": "raw", "DISK_TYPE": "scsi",
+        "DISK_CACHE": cache, "DISK_IO": io, "DISK_DISCARD": "unmap", "ALLOCATE": "N",
+        "BOOT_MODE": "windows", "TPM": "Y", "KVM": "Y", "HV": "Y",
+        "DISPLAY": "web", "DEBUG": "N", "MTU": "1486",
+    }
+    devices = ["/dev/kvm", "/dev/net/tun"]
+    if Path("/dev/vhost-net").exists():
+        devices.append("/dev/vhost-net")
+    config = {"services": {"windows": {
+        "container_name": "windows", "image": setting("WINDOWS_IMAGE", IMAGE),
+        "labels": {"com.windows-dind.config": "2"},
+        "environment": environment,
+        "ports": ["3389:3389/tcp", "3389:3389/udp", "127.0.0.1:8006:8006/tcp"],
+        "devices": devices, "cap_add": ["NET_ADMIN"],
+        "volumes": [f"{storage}:/storage", f"{workspace}:/data"],
+        "restart": "unless-stopped", "stop_grace_period": "2m",
+    }}}
+    temp = storage / "windows.yaml.new"
+    temp.write_text(json.dumps(config, indent=2) + "\n")
+    temp.replace(storage / "windows.yaml")
+    print(f"Windows: {cpus} vCPUs, {ram_mib} MiB RAM, {disk_size} sparse raw disk; KVM required.")
+    return config
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--check-kvm", action="store_true")
+    parser.add_argument("--resources", action="store_true")
+    args = parser.parse_args()
+    try:
+        if args.check_kvm:
+            check_kvm()
+        elif args.resources:
+            print(json.dumps(resources(), indent=2))
+        else:
+            generate(workspace_path(), resources())
+    except (ValueError, OSError, subprocess.CalledProcessError) as error:
+        print(f"ERROR: {error}", file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
