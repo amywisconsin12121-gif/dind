@@ -4,12 +4,24 @@ set -Eeuo pipefail
 source "$(dirname -- "${BASH_SOURCE[0]}")/helpers/common.sh"
 
 if [[ -s "$storage/data.img" && "${1:-}" != --replace ]]; then
+    if [[ -f "$storage/microsoft-install.json" && ! -f "$storage/windows.boot" ]]; then
+        # A verified installer may not yet have partitioned the new disk.
+        python3 "$workspace/.devcontainer/prepare-microsoft.py"
+        exit 0
+    fi
     check_boot_data "$storage/data.img"
     echo 'Keeping the existing Windows disk.'
     # Migrate an existing disk whose first-run marker was never written.
     [[ -e "$storage/windows.boot" ]] || printf 'data.img\n' > "$storage/windows.boot"
     exit 0
 fi
+
+# The author's newest preview expired on 2026-08-11. New installations use
+# verified, non-evaluation Microsoft media; existing Windows disks are retained.
+if [[ -z "${WINDOWS_SOURCE_VHDX:-}" && "${WINDOWS_SOURCE:-microsoft}" == microsoft ]]; then
+    exec python3 "$workspace/.devcontainer/prepare-microsoft.py" "$@"
+fi
+[[ -n "${WINDOWS_SOURCE_VHDX:-}" || "${WINDOWS_SOURCE:-microsoft}" == itzlevvie ]] || fail 'WINDOWS_SOURCE must be microsoft or itzlevvie.'
 
 cache=${WINDOWS_IMAGE_CACHE:-/tmp/windows-dind-image}
 mkdir -p -- "$cache"

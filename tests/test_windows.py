@@ -1,5 +1,6 @@
 """Regressions for resource limits and the original destructive lifecycle paths."""
 import importlib.util
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -14,6 +15,53 @@ ROOT = Path(__file__).resolve().parent.parent
 spec = importlib.util.spec_from_file_location("windows_config", ROOT / ".devcontainer/windows-config.py")
 config = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(config)
+media_spec = importlib.util.spec_from_file_location("prepare_microsoft", ROOT / ".devcontainer/prepare-microsoft.py")
+media = importlib.util.module_from_spec(media_spec)
+media_spec.loader.exec_module(media)
+
+
+class MicrosoftInstallTests(unittest.TestCase):
+    def test_missing_disk_requires_an_explicit_prepared_installer(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "windows").mkdir()
+            with patch.dict(os.environ, {}, clear=True), self.assertRaisesRegex(ValueError, "missing"):
+                config.generate(root, {"cpus": 4, "ram_mib": 12288})
+
+    def test_prepared_installer_boots_without_disk_and_keeps_password_out_of_compose(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            storage = root / "windows"
+            storage.mkdir()
+            iso = root / "verified.iso"
+            iso.write_bytes(b"verified fixture")
+            env = root / "private.env"
+            env.write_text("PASSWORD=private-fixture-password\n")
+            (storage / "microsoft-install.json").write_text(json.dumps({"iso": str(iso), "env_file": str(env), "temp": str(root / "installer")}))
+            with patch.dict(os.environ, {}, clear=True):
+                service = config.generate(root, {"cpus": 4, "ram_mib": 12288}, quiet=True)["services"]["windows"]
+            self.assertEqual(service["environment"]["VERSION"], "11")
+            self.assertEqual(service["environment"]["KVM"], "Y")
+            self.assertEqual(service["env_file"], [str(env)])
+            self.assertIn(str(iso) + ":/boot.iso:ro", service["volumes"])
+            self.assertNotIn("private-fixture-password", (storage / "windows.yaml").read_text())
+            self.assertFalse((storage / "data.img").exists())
+
+    def test_failed_microsoft_checksum_preserves_existing_windows_on_reset(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            storage = root / "windows"
+            storage.mkdir()
+            original = storage / "data.img"
+            original.write_bytes(b"Windows and user files to preserve")
+            cache = root / "cache"
+            cache.mkdir()
+            def download(args, **kwargs):
+                Path(args[-1]).write_bytes(b"bad")
+            with patch.object(media, "ISO_BYTES", 3), patch.object(media, "ISO_SHA256", hashlib.sha256(b"yes").hexdigest()), patch.object(media.shutil, "disk_usage", return_value=shutil._ntuple_diskusage(100 * config.GIB, 0, 100 * config.GIB)), patch.object(media.subprocess, "run", side_effect=download), self.assertRaisesRegex(ValueError, "checksum"):
+                media.prepare(root, cache, replace=True)
+            self.assertEqual(original.read_bytes(), b"Windows and user files to preserve")
+            self.assertFalse((storage / "microsoft-install.json").exists())
 
 
 class ResourceTests(unittest.TestCase):

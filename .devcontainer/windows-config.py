@@ -226,7 +226,11 @@ def generate(workspace, limits, quiet=False):
     if not 4096 <= ram_mib <= limits["ram_mib"]:
         raise ValueError(f"RAM_SIZE must fit between 4096M and {limits['ram_mib']}M with host headroom. Free memory or select a larger Codespace.")
     disk = storage / "data.img"
-    virtual_size = disk.stat().st_size
+    installing = storage / "microsoft-install.json"
+    installation = json.loads(installing.read_text()) if installing.exists() and not (storage / "windows.boot").exists() else None
+    if not disk.exists() and not installation:
+        raise ValueError("The Windows disk is missing. Run start to prepare the installation.")
+    virtual_size = disk.stat().st_size if disk.exists() else 128 * GIB
     if virtual_size == 0:
         raise ValueError("The Windows raw disk is empty.")
     primary = report["workspace"]
@@ -261,6 +265,10 @@ def generate(workspace, limits, quiet=False):
         "BOOT_MODE": "windows", "TPM": "Y", "KVM": "Y", "HV": "Y",
         "DISPLAY": "web", "DEBUG": "N", "MTU": "1486",
     }
+    if installation:
+        if not Path(installation["iso"]).is_file():
+            raise ValueError("Windows installer media is missing. Run start to restore it.")
+        environment.update({"VERSION": "11", "WINDOWS_INSTALL_TEMP": "/windows-dind-installer/unpack"})
     devices = ["/dev/kvm", "/dev/net/tun"]
     if Path("/dev/vhost-net").exists():
         devices.append("/dev/vhost-net")
@@ -268,6 +276,10 @@ def generate(workspace, limits, quiet=False):
     volumes = [f"{storage}:/storage", f"{workspace}:/data",
                f"{runtime / 'entry.sh'}:/usr/local/lib/windows-dind/entry.sh:ro",
                f"{runtime / 'patch-boot.py'}:/usr/local/lib/windows-dind/patch-boot.py:ro"]
+    if installation:
+        temp = Path(installation["temp"])
+        temp.mkdir(parents=True, exist_ok=True, mode=0o700)
+        volumes.extend([f"{installation['iso']}:/boot.iso:ro", f"{temp}:/windows-dind-installer"])
     if secondary_size:
         scratch.mkdir(parents=True, exist_ok=True, mode=0o700)
         environment["DISK2_SIZE"] = secondary_size
@@ -283,6 +295,8 @@ def generate(workspace, limits, quiet=False):
         # Codespace resume must run our KVM/resource probes before booting.
         "restart": "no", "stop_grace_period": "2m",
     }}}
+    if installation:
+        config["services"]["windows"]["env_file"] = [installation["env_file"]]
     temp = storage / "windows.yaml.new"
     temp.write_text(json.dumps(config, indent=2) + "\n")
     temp.replace(storage / "windows.yaml")
