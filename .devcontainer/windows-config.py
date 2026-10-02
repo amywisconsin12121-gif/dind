@@ -189,7 +189,8 @@ def scratch_disk(report, path, requested):
             raise ValueError("DISK2_SIZE exceeds the temporary filesystem's physical capacity after headroom.")
     report.update({"image": str(disk), "virtual_bytes": target, "allocated_bytes": allocated_bytes(disk),
                    "growth_budget_bytes": max(0, report["available_bytes"] - SCRATCH_RESERVE),
-                   "overcommitted": target > budget})
+                   "overcommitted": target > allocated_bytes(disk) + report["available_bytes"],
+                   "headroom_shortfall_bytes": max(0, target - budget)})
     return f"{math.ceil(target / MIB)}M"
 
 

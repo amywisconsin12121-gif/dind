@@ -34,7 +34,9 @@ ensure_docker() {
         docker info >/dev/null 2>&1 && exit 0
         if ! pgrep -x dockerd >/dev/null; then
             rm -f /var/run/docker.pid
-            nohup dockerd > /run/windows-dind/docker.log 2>&1 </dev/null 8>&- 9>&- &
+            # Lifecycle and SSH shells can terminate their process group on exit.
+            # Start a separate session so the daemon survives that cleanup.
+            nohup setsid --fork dockerd > /run/windows-dind/docker.log 2>&1 </dev/null 8>&- 9>&- &
         fi
         for ((attempt=0; attempt<60; attempt++)); do
             docker info >/dev/null 2>&1 && exit 0
