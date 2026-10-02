@@ -1,64 +1,70 @@
 # Investigation and validation — 2026-10-02
 
-The investigation used public upstream `ItzLevvie/dind` commit `76c6eb0034806439b277a657bde751f84eaaf8f2`. The user's fork URL and failed Codespace were not available. The workspace's authenticated GitHub API request returned HTTP 401 (`Bad credentials`), so no fork was changed and no account Codespace was started or rebuilt.
+The repaired fork is [amywisconsin12121-gif/dind](https://github.com/amywisconsin12121-gif/dind), based on ItzLevvie commit `76c6eb0034806439b277a657bde751f84eaaf8f2`. Tests used a real Codespace created from this fork, `windows-kvm-4-cores---repaired-vprq6gpgx9x4hw555`. The unrelated dockur/windows Codespace was deleted as requested.
 
-## Confirmed upstream defects
+## Actual machine and Windows measurements
+
+GitHub's machines API offered only 2-core/8-GB and 4-core/16-GB configurations, both with 32 GB persistent storage. The test used `standardLinux32gb` with **4 cores and 16 GB RAM**, the largest offered configuration. Its actual region is `UkSouth`.
+
+| Item | Verified result |
+| --- | --- |
+| Acceleration | `/dev/kvm` API version 12 and successful `KVM_CREATE_VM`; real Windows QEMU uses KVM and host CPU passthrough. |
+| CPU | Windows reports four cores and four logical processors, AMD EPYC 7763. |
+| Host RAM | 16,770,494,464 bytes, approximately 15.62 GiB. Guest allocation leaves capacity for Linux, Docker, QEMU overhead, the editor, and networking. |
+| Persistent filesystem | 33,636,024,320 bytes, approximately 31.32 GiB, shared by the checkout, VM disk, and Docker volume. |
+| Separate temporary filesystem | 126,225,022,976 bytes, approximately 117.56 GiB. |
+| Added scratch disk | 112,299,343,872 bytes, **104.59 GiB**, measured after image import and runtime pulls, with 4 GiB host headroom. Formatted in Windows as NTFS `S:`. |
+| Windows boot disk | 128 GiB virtual sparse raw image. This does not supply 128 GiB persistent physical storage; monitor the host's actual free space. |
+| Guest OS | Windows 11 Enterprise Insider Preview, build 29599.1000, using the author's release 29599-1. |
+| Windows configuration | High performance power plan, AC sleep disabled, TRIM enabled, firewall enabled on all profiles, RDP service running, NLA required, password authentication. |
+| Native RDP | Authenticated full desktop sessions over an authenticated GitHub CLI TCP tunnel, including a fresh sign-in. FreeRDP was forced to NLA with the server certificate fingerprint pinned and independently confirmed inside Windows. RDP drive redirection works. |
+
+**The scratch disk is temporary. GitHub clears `/tmp` on every Codespace stop or idle timeout.** Windows and account settings stay on the persistent boot disk. Do not treat the scratch disk as a backup. The VM's original 128-GiB C: free-space display exceeds its physical workspace budget.
+
+## Confirmed failures and repairs
 
 | Finding | Evidence and consequence | Repair |
 | --- | --- | --- |
-| Host-wide image pruning during initialization | `initializeCommand.sh` runs `docker system prune --all --force` every initialization. The author identifies this as the cause of recovery mode on restart in [issue 9](https://github.com/ItzLevvie/dind/issues/9#issuecomment-3667570327). | Remove the initialization command. |
-| Destructive checkout removal | `onCreateCommand.sh` moves `.devcontainer` out, removes `/workspaces/github` recursively, then recreates it. This removes `.git`, the README, and user files. | Install helpers without deleting the checkout or Windows disk. |
-| Restart keeps stale resource/configuration settings | The original `restart` runs `compose restart`, which does not recreate the container with changed YAML. A real Docker test changed an environment value: restart retained the old value; `compose up -d` applied the new value. | Recompute resource settings after graceful shutdown, then use `compose up -d` to reconcile the container. |
-| Reset does not stop the VM | Bash resolves bare `kill` to its built-in. Reproduced: `kill` without a PID returns usage status 2, while the script continues and deletes the disk. | Stop/remove the actual Compose service, convert a replacement separately, then rename it atomically. |
-| Docker races and suppressed diagnostics | Post-start deletes pidfiles and launches a hidden daemon; `start` launches another daemon regardless of health. | Check the local daemon, serialize startup, wait for readiness, and retain a log. |
-| Resource overcommit and disk assumptions | `nproc --all` and `free` do not enforce container quotas. Most available RAM is assigned to Windows with `RAM_CHECK=N`; a 16-GiB swap file is added. Disk sizes depend on free space and grep matches, and `/workspaces` may measure a different mount from `/workspaces/github`. | Honor affinity/cgroup CPU and memory limits, reserve host RAM, enable the RAM check, and keep the imported disk size. |
-| Incomplete import can be treated as success | Original downloads and conversions have no fail-fast setting or checksums, and markers/configuration are written after errors. | Verify each archive, check extraction and conversion space, and publish a converted image only after success. |
-| Empty disks can trigger a different installation | The pinned dockur runtime checks the first 100 KiB for data and treats an all-zero disk as empty. Reproduced with an empty sparse disk and a boot marker: the runtime attempted to fetch a Microsoft installer. | Refuse an existing or converted all-zero disk before launching the runtime. |
-| Startup can wait indefinitely for Tailscale authentication | The original Windows start calls interactive `tailscale up` before launching the VM. | Make login a separate helper and resume stored state without blocking lifecycle commands on expired login. |
-| Browser forwarding confused with native RDP | Codespaces' browser forwarding uses HTTP/HTTPS. A web URL is not an RDP TCP endpoint. | Forward only the web console in the browser; document Tailscale and a local TCP tunnel for native RDP. |
-| Unpinned runtime and tool builds | Debian sid, numerous `latest` artifact binaries, and `dockurr/windows:latest` can change independently. | Use Debian stable Docker packages, stable Tailscale 1.102.4, and dockur 6.05 pinned to its tested GHCR manifest digest. |
+| Destructive initialization | Upstream prunes all Docker images during initialization and removes the checkout recursively during onCreate. The author associates pruning with recovery mode in issue 9. | Preserve the checkout, Windows disk, and image cache; install helpers in place. |
+| Stale restart configuration | Real Docker tests confirmed `compose restart` retains previous resource/environment settings. | Gracefully stop, recompute settings, then reconcile with `compose up -d`. |
+| Unsafe reset | Bash resolves bare `kill` to its builtin, which returns usage status 2 without a PID; the old script proceeds to delete the VM disk. | Stop and remove the real service, verify a separate replacement conversion, and atomically rename only after success. |
+| Imported UEFI disk rejected | The author's image boots through `UEFI QEMU QEMU HARDDISK`, while the runtime's watchdog only recognized `Windows Boot Manager`. The real accelerated guest was stopped at the watchdog deadline despite valid boot progress. | Patch only that imported-disk state in the pinned runtime; preserve DVD, shell, missing-device, and firmware-failure paths. |
+| Externally terminated high-RAM boots | Repeated approximately 13.6-GiB launches received SIGTERM. `strace` recorded `SI_USER`, sender PID 0 outside the container PID namespace, UID 61876; cgroup OOM counters remained zero. The user confirmed they did not stop it. A 13-GiB trial also lost the daemon approximately 39 seconds after startup. A 10-GiB diagnostic allocation ran for over 50 minutes and supported Windows setup and native RDP. The repaired automatic budget selected 12,596 MiB (12.30 GiB). | Budget from genuinely available RAM after existing host use, with at least 2 GiB left available. Do not interpret absence of an OOM event as proof of adequate host memory. The exact external supervisor was not identified. |
+| Background daemon lifecycle | Docker and Tailscale processes inherited lifecycle sessions; abrupt daemon loss hid useful diagnostics. | Serialize Docker startup, retain logs, and detach background daemons with `nohup setsid --fork`. |
+| Automatic restart uses old RAM | During diagnosis, restoring Docker relaunched the previous high-RAM VM before resource checks could run. | Disable Docker automatic restart. Marked Codespace resume invokes the resource-aware helper. |
+| Unchecked image import | Original download/conversion failures could leave success markers or a blank disk, causing the runtime to attempt an unrelated fresh installation. | Pin and verify all five archive SHA-256 digests, validate nonempty imported disk data, check staging space, and preserve the old disk on failures. |
+| CPU, RAM, and disk assumptions | Original host-wide CPU/memory queries ignore container quotas; old disk matching measures incorrect mounts and adds a large swap file. | Honor CPU affinity/cgroup quotas, measure the actual filesystems, exclude shared/tmpfs scratch paths, preserve existing images, reserve headroom, and avoid swap and duplicate base disks. |
+| Scratch initializer driver mismatch | Inside the real Windows guest, the VirtIO SCSI driver identifies the disk bus as `SAS`. A SCSI-only guard rejects the valid blank disk. | Accept SCSI/SAS while still requiring exact host-plan size, a RAW partition table, and non-boot/non-system status. Permit an explicit plan file path for RDP drive redirection. |
+| Startup waits for Tailscale login | Upstream starts interactive login before the VM. | Keep login separate; resume stored state without blocking Windows on expired authentication. |
+| Web forwarding used as RDP | Codespaces browser forwarding is HTTP/HTTPS and cannot supply an RDP server URL. | Keep the web console private; use GitHub CLI local TCP forwarding or authenticated Tailscale for native RDP. |
+| Runtime changes independently | Upstream uses Debian sid, unpinned tools, and the runtime's latest tag. | Use stable Debian packages, stable Tailscale, and dockur 6.05 pinned to its tested GHCR manifest digest. |
+| Diagnostics miss QEMU | The actual QEMU process is named `windows`, so `pgrep qemu-system` returns no process. | Read the runtime's PID file and inspect that process; probe the actual guest IP and RDP listener. |
 
-## Validation completed
+## Load test
 
-- Downloaded all five actual release 29599-1 archives, totaling **4,421,755,822 bytes**, and verified every published SHA-256 digest. The current release files are intact; no missing-release failure was found.
-- Read the real archive directory: it contains `data.vhdx`, **14,701,035,520 bytes** (approximately 13.69 GiB). Archives plus extraction alone need approximately 17.81 GiB before conversion; staging checks include additional headroom.
-- Read the VHDX's virtual-disk-size metadata from its header: **137,438,953,472 bytes (128 GiB)**. This was metadata inspection, not a full extraction or Windows boot. The resource generator preserves that capacity; it is not evidence of 128 GiB of physical space.
-- Built the fixed devcontainer image successfully with TLS verification enabled. Checked installed Docker/Compose, QEMU tools, GitHub CLI, and Tailscale.
-- Started the actual Docker daemon inside a privileged test container. Calling its startup helper twice left exactly one `dockerd` process. The tested daemon selected VFS in this cloud environment; Windows storage is a bind-mounted raw image rather than a Docker image layer.
-- Ran the regression suite in the root test container: all 17 tests passed, including CPU/memory limits, disk preservation, cached-image startup, reset ordering, nonblocking Tailscale resume, and seven storage cases. Synthetic separate-filesystem measurements test maximum sizing, shared-device and tmpfs exclusions, used-image accounting, shrink prevention, and low-space failures. They do not measure the user's actual Codespace disk.
-- Checked real Compose behavior with a cached image and no container: `compose images` lists only its header. This corrects an earlier simulated finding; cached images alone were not established as an original startup defect. A real container test did establish that `compose restart` ignores changed configuration.
-- Imported a real synthetic VHDX with nonzero data using QEMU 10.0.13, compared the converted raw disk byte-for-byte, and verified that a failed replacement leaves the old disk unchanged. Repeated preparation kept the existing disk.
-- Validated Bash syntax and ShellCheck, the generated Compose configuration, and the Windows PowerShell script's parser syntax.
-- Checked the pinned dockur startup pipeline using a nonempty synthetic raw disk and the original boot marker. It invoked QEMU without fetching another Windows installer. This isolated test explicitly used TCG with networking disabled; the fixture contained no OS and reached UEFI's no-boot-device screen before the expected timeout. It is not a Windows boot or performance test.
-- Repeated the isolated runtime check with `/storage2` attached: dockur created the requested **2-GiB sparse raw second disk** and launched QEMU. The synthetic boot disk again contained no OS; the test used explicit TCG with networking disabled and ended at the expected timeout. The production configuration still requires KVM. Real Compose also accepted the generated configuration and skipped fetching the locally cached, pinned VM image with `pull --policy missing`.
+At the repaired 12,596-MiB allocation, a four-worker SHA-256 workload completed for **60.025 seconds**, processing **5.352 GiB/s** in aggregate. A subsequent **1-GiB write-through scratch-file write**, flushed to the storage device, completed in **2.348 seconds (436 MiB/s)**. Windows, RDP, and the host remained running. These are a baseline and a stability check, not a comparison of cache modes or a promise of sustained disk throughput.
 
-The first attempt to build the original Dockerfile hit Docker Hub HTTP 429 at the base image fetch. That is a test-environment registry limit, not evidence that the user's Codespace had the same failure. The fixed build used the public Debian image mirror, and the Windows runtime was fetched from its official GHCR publication.
+## Verification
 
-## Requested 4-core/16-GB capacity profile
+- Downloaded and verified all five release 29599-1 archives, totaling **4,421,755,822 bytes**. Extracted the **14,701,035,520-byte** VHDX, converted it, and booted the real Windows installation with KVM. Archive staging is removed after successful import.
+- Built the repaired devcontainer with TLS verification enabled. The real Codespace creation completed with working Docker, unique SSH host keys, GitHub CLI SSH access, KVM, VirtIO networking, and the persistent checkout intact.
+- Ran **18 regression tests successfully** in the root test container. These cover resource limits and host memory use, independent storage capacity, used-image accounting, preservation and shrink refusal, nonempty disk guards, lifecycle ordering, safe reset, and expired Tailscale login.
+- Ran the imported-UEFI watchdog regression against the pinned real runtime. The test reproduces the original rejection, accepts valid imported-disk progress after patching, preserves all known failure paths, and checks patch idempotence.
+- Parsed both PowerShell scripts and checked Bash syntax, ShellCheck, Compose configuration, and patch whitespace.
+- Imported a nonempty synthetic VHDX and compared the converted raw disk byte-for-byte. Failed replacement conversion retained the old disk.
+- Executed `Configure-Windows.ps1` and `Initialize-Scratch.ps1` inside the real Windows guest. Tested native RDP password authentication and full desktop access, a fresh sign-in, file transfer, and the guest's actual CPU, memory, disk, certificate, firewall, and power-plan state.
 
-The devcontainer requests the user's maximum available 4-core/16-GB machine, with at least 32 GB of workspace storage. The VM receives all allowed vCPUs and normally up to 14 GiB RAM, retaining Linux/QEMU headroom. KVM, host CPU passthrough, and Hyper-V enlightenments remain enabled. An actual performance benchmark is still needed before claiming the fastest disk-cache mode on that machine.
+The imported preview image's guest SMB client failed authentication to the runtime's host share even though networking and TCP 445 worked. RDP drive redirection was tested as a working transfer path; setup and scratch initialization do not require weakening RDP NLA or disabling the firewall.
 
-`DISK_SIZE=max` keeps the oversized imported boot disk and allows expansion only when physical workspace capacity supports it. `DISK2_SIZE=auto` adds a separate disk-backed scratch filesystem's usable capacity after 4 GiB of headroom, with VM image pulls completed before the final measurement. The generator uses the actual image directory's filesystem, excludes RAM-backed or shared filesystems, accounts for allocated blocks in existing images, and never shrinks them. Current physical capacity and the last generated storage plan are available through `windows-doctor`.
-
-GitHub documents that **`/tmp` is cleared on every Codespace stop or idle timeout**. The boot disk stays in persistent workspace storage. The added `Initialize-Scratch.ps1` requires an explicit disk number, checks its size against the host plan, and refuses boot/system disks and disks containing existing partitions. It was parser-checked, not executed in Windows. Scratch initialization must be repeated after the temporary image is cleared. The old upstream table's 118-GB temporary-disk figure has not been verified for this user's machine.
-
-The VM's Docker restart policy is `on-failure:3` so daemon startup does not boot it ahead of the Codespace helper's KVM/resource checks. Marked Codespace resume runs that helper and computes a new scratch budget. This behavior is based on Docker's documented restart-policy semantics and still needs a real Codespace stop/resume test.
-
-## Validation still requiring the user's Codespace
-
-This managed test workspace has no `/dev/kvm`. The real probe reports that KVM cannot create a VM and stops before downloading or launching Windows. Full accelerated Windows boot, the fork's creation logs, native RDP authentication/UDP operation, actual Tailscale connectivity, and performance benchmarks remain unverified. The PowerShell script was parsed, not executed against a Windows guest.
-
-To finish the investigation, provide the fork URL and restore GitHub authentication with repository write access and Codespaces access. Test an existing Codespace's machine/KVM and creation logs, apply the reviewed branch to the fork, then verify graceful stop/resume and an actual RDP login. Do not infer KVM support solely from the nominal CPU family or machine size.
+Tailscale direct/relayed connectivity and RDP UDP have not been tested because joining the user's tailnet requires their own Tailscale login. TCP RDP is verified. No comparison of all disk cache modes establishes an absolute fastest I/O profile; the default uses VirtIO SCSI, sparse raw files, direct I/O, and TRIM.
 
 ## Sources checked
 
 - [ItzLevvie recovery-mode issue and author explanation](https://github.com/ItzLevvie/dind/issues/9#issuecomment-3667570327)
-- [ItzLevvie RDP drop report](https://github.com/ItzLevvie/dind/issues/10) — no confirmed cause or maintainer resolution; the repair does not claim to reproduce this separate problem.
+- [ItzLevvie RDP drop report](https://github.com/ItzLevvie/dind/issues/10)
 - [Actual Windows image release 29599-1](https://github.com/ItzLevvie/artifacts/releases/tag/29599-1)
-- [dockur 6.05 environment variables](https://github.com/dockur/windows/blob/v6.05/docs/environment.md) and its QEMU 7.48 initialization, CPU, disk, and network scripts.
-- [dockur's recent Codespaces disk minimum fix](https://github.com/dockur/windows/pull/2214)
-- [GitHub Codespaces overview and machine capacities](https://docs.github.com/en/codespaces/overview)
+- [Pinned dockur 6.05 runtime](https://github.com/dockur/windows/tree/v6.05) and [environment variables](https://github.com/dockur/windows/blob/v6.05/docs/environment.md)
+- [GitHub Codespaces machine capacities](https://docs.github.com/en/codespaces/overview)
 - [Codespaces temporary-file lifecycle](https://docs.github.com/en/codespaces/developing-in-a-codespace/persisting-environment-variables-and-temporary-files)
-- [Docker restart-policy behavior](https://docs.docker.com/engine/containers/start-containers-automatically/)
 - [Codespaces port forwarding](https://docs.github.com/en/codespaces/developing-in-a-codespace/forwarding-ports-in-your-codespace)
-- [Azure Dasv5](https://learn.microsoft.com/en-us/azure/virtual-machines/sizes/general-purpose/dasv5-series) and [Dasv6](https://learn.microsoft.com/en-us/azure/virtual-machines/sizes/general-purpose/dasv6-series) feature support. Azure support does not establish what an individual Codespace exposes.
+- [Docker restart-policy behavior](https://docs.docker.com/engine/containers/start-containers-automatically/)

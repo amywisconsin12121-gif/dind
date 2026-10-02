@@ -10,7 +10,7 @@ It is based on the [dockur/windows](https://github.com/dockur/windows) repositor
 
 Create the Codespace from **your fork and the branch containing these fixes**. Choose the **4-core/16-GB machine**, the largest CPU/RAM configuration available to this account, with the most storage offered at that size. The old badge and CLI examples pointed to ItzLevvie's upstream repository, so they did not use changes in a fork.
 
-Once the terminal opens, run `start`. This checks working KVM acceleration, downloads and verifies ItzLevvie's existing image if needed, and boots Windows in the background. Open forwarded port **8006** to finish Windows setup. Then run `start-tailscale` and sign in; use the displayed Tailscale IPv4 address in your Remote Desktop client.
+Once the terminal opens, run `start`. This checks working KVM acceleration, downloads and verifies ItzLevvie's existing image if needed, and boots Windows in the background. Open forwarded port **8006** to finish Windows setup. Follow the setup guide to enable password-protected RDP, then connect using a GitHub CLI TCP tunnel or `start-tailscale`.
 
 For passwords, Windows RDP configuration, an alternative local TCP tunnel, performance settings, and recovery instructions, see [the setup guide](docs/codespaces-setup.md). Run `windows-doctor` to collect VM, KVM, storage, and RDP diagnostics. [The investigation report](docs/investigation.md) explains the original failures and exactly what was tested.
 
@@ -115,7 +115,7 @@ This repository was also inspired by many different websites:
 
 ### What machine types are available for GitHub Codespaces?
 
-This account's maximum is **4 cores and 16 GB RAM**. The repaired devcontainer requests that size and normally gives Windows all 4 vCPUs and up to 14 GiB RAM, leaving room for Linux and QEMU.
+This account's maximum is **4 cores and 16 GB RAM**. The repaired devcontainer requests that size and gives Windows all 4 vCPUs. RAM is measured after existing host use, leaving at least 2 GiB available for the Codespace. The tested automatic allocation was about 12.3 GiB; 13-GiB and 13.6-GiB trials were externally terminated.
 
 Use `gh api repos/YOUR_GITHUB_USERNAME/dind/codespaces/machines` to check the storage allocation actually offered at that size. The usual `standardLinux32gb` allocation is 32 GB of persistent workspace storage. `/tmp` capacity varies by host; inspect `windows-doctor` rather than assuming the old upstream 118-GB figure applies.
 

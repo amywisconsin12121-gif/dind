@@ -69,6 +69,8 @@ check_boot_data() {
 
 show_access() {
     echo 'Windows is starting. Open forwarded port 8006 to finish setup.'
-    echo 'For RDP, run start-tailscale and connect to its IPv4 address on port 3389.'
+    echo "For RDP from your computer: gh codespace ports forward 3389:13389 --codespace ${CODESPACE_NAME:-YOUR_CODESPACE_NAME}"
+    echo 'Then connect your Remote Desktop client to 127.0.0.1:13389 with your Windows credentials.'
+    echo 'For a Tailscale connection, run start-tailscale and use its IPv4 address on port 3389.'
     echo 'Use windows-doctor to check the VM, KVM, disk space, and RDP listener.'
 }

@@ -1,11 +1,11 @@
 # Windows setup and performance
 
-Use the repository's repaired branch when creating or rebuilding a Codespace. Back up an existing `windows/data.img` before applying the repair to an existing workspace. The original `onCreateCommand.sh` deletes the checkout, so inspect and back up a failed Codespace before rerunning its original lifecycle commands.
+Use this fork's repaired default branch when creating or rebuilding a Codespace. Back up an existing `windows/data.img` before applying the repair to an existing workspace. The original `onCreateCommand.sh` deletes the checkout, so inspect and back up a failed Codespace before rerunning its original lifecycle commands.
 
 The devcontainer includes an OpenSSH server with per-container host keys so `gh codespace ssh` and `gh codespace logs` can inspect it. Connect from a computer authenticated to GitHub with `gh codespace ssh --codespace YOUR_CODESPACE_NAME`.
 
 1. Open the Codespace terminal and run `start`.
-2. Open port 8006 from the Ports panel. Keep that browser console private and finish Windows OOBE, including creating your Windows account.
+2. Open port 8006 from the Ports panel. Keep that browser console private and finish Windows OOBE, including creating your Windows account with a password.
 3. In an elevated Windows PowerShell window, run:
 
    ```powershell
@@ -29,7 +29,7 @@ Keep that command running and point your Remote Desktop client to `127.0.0.1:133
 
 ## Performance settings
 
-The devcontainer requests a minimum of **4 cores, 16 GB RAM, and 32 GB storage**. Use the 4-core machine: it is the highest CPU/RAM configuration available to this account. The defaults use all CPUs available within affinity and cgroup limits and leave the greater of 2 GiB or 10% of effective host memory **available after Linux's existing memory use**. Guest RAM therefore depends on the actual host load; inspect the allocation printed by `start`. Giving Windows all 16 GiB leaves no room for Linux, QEMU overhead, Docker, the editor, or Tailscale. On the tested Codespace, repeated 13.6-GiB boots were externally terminated, while a 10-GiB diagnostic profile ran for over 40 minutes. CPU host passthrough and Hyper-V enlightenments come from the pinned dockur QEMU runtime. Disks use sparse raw format, VirtIO SCSI, direct I/O, and TRIM. No 16-GiB swap file or duplicate raw base disk is created.
+The devcontainer requests a minimum of **4 cores, 16 GB RAM, and 32 GB storage**. Use the 4-core machine: it is the highest CPU/RAM configuration available to this account. The defaults use all CPUs available within affinity and cgroup limits and leave the greater of 2 GiB or 10% of effective host memory **available after Linux's existing memory use**. Guest RAM therefore depends on the actual host load; inspect the allocation printed by `start`. Giving Windows all 16 GiB leaves no room for Linux, QEMU overhead, Docker, the editor, or Tailscale. On the tested Codespace, 13-GiB and 13.6-GiB trials were externally terminated. A 10-GiB diagnostic profile ran for over 50 minutes, and the repaired automatic allocation passed the CPU/disk load test. The repaired automatic budget then selected 12,596 MiB (approximately 12.30 GiB). CPU host passthrough and Hyper-V enlightenments come from the pinned dockur QEMU runtime. Disks use sparse raw format, VirtIO SCSI, direct I/O, and TRIM. No 16-GiB swap file or duplicate raw base disk is created.
 
 KVM is required and its API must actually create a VM; an existing device filename alone is insufficient. `DEBUG=N` prevents dockur's debug mode from silently falling back to slow software emulation. If the host does not expose nested virtualization, scripts cannot supply it. `windows-doctor` reports the actual probe failure. Machine availability and acceleration must be checked on your own Codespace.
 
@@ -43,13 +43,13 @@ Select the offered 4-core/16-GB machine with the greatest `storage_in_bytes`, an
 
 To override resource settings, copy `.devcontainer/settings.example.json` to `windows/settings.json`, edit it, and run `restart`. `CPU_CORES` and `RAM_SIZE` can be `auto` or explicit values such as `4` and `12G`. The configuration rejects CPU/RAM overcommit and disk shrink. `DISK_SIZE=max` uses the primary disk's allocated bytes plus free workspace space, leaving 2 GiB for host files; it preserves any larger existing virtual disk. `keep` preserves the existing size without growth. Explicit expansion cannot exceed physical capacity after headroom.
 
-`DISK_CACHE=none` with `DISK_IO=native` is the default. `writeback` with `threads` is available for workload-specific testing; it uses host cache and can lose buffered writes after an abrupt host stop. There is no measured fastest I/O profile for your Codespace yet. Keep the default until a benchmark on your actual machine supports a change.
+`DISK_CACHE=none` with `DISK_IO=native` is the default. `writeback` with `threads` is available for workload-specific testing; it uses host cache and can lose buffered writes after an abrupt host stop. A baseline stress/write test is documented in the investigation; no comparison establishes a fastest cache mode. Keep the default until a benchmark on your actual machine supports a change.
 
 ## Maximum usable disk capacity
 
 The Windows boot disk remains in persistent `windows/data.img`. ItzLevvie's image has a **128-GiB virtual disk**, but a sparse image does not supply 128 GiB of physical storage. On a 32-GB workspace, C: can report more free space than the host can hold. `start` prints actual host growth space, and `windows-doctor` reports current filesystem capacity. Leave the reserved host space free; filling an oversized C: image can exhaust the workspace.
 
-`DISK2_SIZE=auto` exposes an additional scratch drive when `/tmp` is a separate, disk-backed filesystem. It sizes this image from allocated image bytes plus actual free space, leaving 4 GiB for system files. VM image pulls and initial Windows import finish before the final measurement. No second disk is created if `/tmp` shares the workspace's filesystem or is a tmpfs consuming RAM. For example, 117 GiB free on a separate temporary disk gives a 113-GiB scratch image; this is a sizing example, not a measurement of your Codespace.
+`DISK2_SIZE=auto` exposes an additional scratch drive when `/tmp` is a separate, disk-backed filesystem. It sizes this image from allocated image bytes plus actual free space, leaving 4 GiB for system files. VM image pulls and initial Windows import finish before the final measurement. No second disk is created if `/tmp` shares the workspace's filesystem or is a tmpfs consuming RAM. On this account's tested 4-core Codespace, the separate temporary filesystem was 117.56 GiB in total and the measured scratch disk was 104.59 GiB. It was initialized and mounted inside Windows as `S:`.
 
 **Codespaces deletes `/tmp` whenever the Codespace stops, including an idle timeout. Everything on this scratch drive is then lost.** Keep installed Windows and important files on persistent workspace storage or back them up outside the Codespace. A devcontainer rebuild alone may retain `/tmp`; stopping the Codespace does not. See [GitHub's temporary-file lifecycle documentation](https://docs.github.com/en/codespaces/developing-in-a-codespace/persisting-environment-variables-and-temporary-files).
 
