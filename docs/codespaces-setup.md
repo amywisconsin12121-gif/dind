@@ -2,6 +2,8 @@
 
 Use the repository's repaired branch when creating or rebuilding a Codespace. Back up an existing `windows/data.img` before applying the repair to an existing workspace. The original `onCreateCommand.sh` deletes the checkout, so inspect and back up a failed Codespace before rerunning its original lifecycle commands.
 
+The devcontainer includes an OpenSSH server with per-container host keys so `gh codespace ssh` and `gh codespace logs` can inspect it. Connect from a computer authenticated to GitHub with `gh codespace ssh --codespace YOUR_CODESPACE_NAME`.
+
 1. Open the Codespace terminal and run `start`.
 2. Open port 8006 from the Ports panel. Keep that browser console private and finish Windows OOBE, including creating your Windows account.
 3. In an elevated Windows PowerShell window, run:

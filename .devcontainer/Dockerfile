@@ -13,8 +13,9 @@ RUN --mount=type=secret,id=proxy_ca \
     apt-get update; \
     DEBIAN_FRONTEND=noninteractive apt-get install --no-install-recommends --yes \
       ca-certificates curl docker.io docker-cli docker-compose docker-buildx \
-      qemu-utils 7zip python3 git gh openssh-client iptables iproute2 ethtool \
+      qemu-utils 7zip python3 git gh openssh-client openssh-server iptables iproute2 ethtool \
       procps util-linux htop; \
+    rm -f /etc/ssh/ssh_host_*; \
     rm -f /etc/apt/apt.conf.d/99-build-ca; \
     rm -rf /var/lib/apt/lists/*
 

@@ -4,6 +4,9 @@ set -Eeuo pipefail
 script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 workspace=$(dirname -- "$script_dir")
 mkdir -p -- "$workspace/windows"
+# GitHub CLI starts its own SSH session; provide a server and unique host keys.
+install -d -m 0755 /run/sshd
+ssh-keygen -A
 install -d /usr/local/lib/windows-dind
 printf '%s\n' "$workspace" > /usr/local/lib/windows-dind/workspace
 
