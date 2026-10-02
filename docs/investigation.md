@@ -15,8 +15,9 @@ GitHub's machines API offered only 2-core/8-GB and 4-core/16-GB configurations, 
 | Separate temporary filesystem | 126,225,022,976 bytes, approximately 117.56 GiB. |
 | Added scratch disk | Initially **104.59 GiB**, formatted as NTFS `S:` and load-tested. After the verified Codespace stop/resume cleared `/tmp`, the newly measured maximum was 114,025,299,968 bytes, **106.19 GiB**, with 4 GiB host headroom; it was initialized again as NTFS `S:`. |
 | Windows boot disk | 128 GiB virtual sparse raw image. This does not supply 128 GiB persistent physical storage; monitor the host's actual free space. |
-| Guest OS | Windows 11 Enterprise Insider Preview, build 29599.1000, using the author's release 29599-1. |
-| Activation | The upstream image reports Windows license status 5 (activation notification), with no remaining grace period. |
+| Original guest OS | Windows 11 Enterprise Insider Preview, build 29599.1000, using the author's release 29599-1. Its kernel expiration was **2026-08-11 18:09:44 UTC**, before the test date; Windows displayed an expired-build notification. |
+| Replacement | Verified Microsoft Windows 11 Pro 25H2 media, SHA-256 `d141f6030fed50f75e2b03e1eb2e53646c4b21e5386047cb860af5223f102a32`; guest kernel build 26200 reports **SystemExpirationDate = 0**, with no expiration timestamp. Native NLA RDP authenticated to its desktop. |
+| Activation | The upstream image reports Windows license status 5 (activation notification), with no remaining grace period. The repair does not activate Windows; use your own valid license. |
 | Windows configuration | High performance power plan, AC sleep disabled, TRIM enabled, firewall enabled on all profiles, RDP service running, NLA required, password authentication. |
 | Native RDP | Authenticated full desktop sessions over an authenticated GitHub CLI TCP tunnel, including a fresh sign-in. FreeRDP was forced to NLA with the server certificate fingerprint pinned and independently confirmed inside Windows. RDP drive redirection works. |
 
@@ -27,6 +28,7 @@ GitHub's machines API offered only 2-core/8-GB and 4-core/16-GB configurations, 
 | Finding | Evidence and consequence | Repair |
 | --- | --- | --- |
 | Destructive initialization | Upstream prunes all Docker images during initialization and removes the checkout recursively during onCreate. The author associates pruning with recovery mode in issue 9. | Preserve the checkout, Windows disk, and image cache; install helpers in place. |
+| Expired upstream Windows image | Its kernel expiration date was verified both through QEMU and inside Windows; the GUI said the build had expired. The resumed preview stopped after approximately one hour. Docker recorded an exit without a Docker stop/kill request, and the guest recorded an unexpected previous shutdown. These observations do not prove which component initiated that stop. | New installations use checksum-verified, non-evaluation Microsoft Windows 11 Pro media. Existing disks are preserved; the test setup was migrated after a separate installation. |
 | Stale restart configuration | Real Docker tests confirmed `compose restart` retains previous resource/environment settings. | Gracefully stop, recompute settings, then reconcile with `compose up -d`. |
 | Unsafe reset | Bash resolves bare `kill` to its builtin, which returns usage status 2 without a PID; the old script proceeds to delete the VM disk. | Stop and remove the real service, verify a separate replacement conversion, and atomically rename only after success. |
 | Imported UEFI disk rejected | The author's image boots through `UEFI QEMU QEMU HARDDISK`, while the runtime's watchdog only recognized `Windows Boot Manager`. The real accelerated guest was stopped at the watchdog deadline despite valid boot progress. | Patch only that imported-disk state in the pinned runtime; preserve DVD, shell, missing-device, and firmware-failure paths. |
@@ -41,7 +43,7 @@ GitHub's machines API offered only 2-core/8-GB and 4-core/16-GB configurations, 
 | Runtime changes independently | Upstream uses Debian sid, unpinned tools, and the runtime's latest tag. | Use stable Debian packages, stable Tailscale, and dockur 6.05 pinned to its tested GHCR manifest digest. |
 | Diagnostics miss QEMU | The actual QEMU process is named `windows`, so `pgrep qemu-system` returns no process. | Read the runtime's PID file and inspect that process; probe the actual guest IP and RDP listener. |
 
-## Load test
+## Load test of the original imported preview
 
 At the repaired 12,596-MiB allocation, a four-worker SHA-256 workload completed for **60.025 seconds**, processing **5.352 GiB/s** in aggregate. A subsequent **1-GiB write-through scratch-file write**, flushed to the storage device, completed in **2.348 seconds (436 MiB/s)**. Windows, RDP, and the host remained running. These are a baseline and a stability check, not a comparison of cache modes or a promise of sustained disk throughput.
 
@@ -53,7 +55,7 @@ Windows stopped gracefully before the full GitHub Codespace stop. GitHub took ap
 
 - Downloaded and verified all five release 29599-1 archives, totaling **4,421,755,822 bytes**. Extracted the **14,701,035,520-byte** VHDX, converted it, and booted the real Windows installation with KVM. Archive staging is removed after successful import.
 - Built the repaired devcontainer with TLS verification enabled. The real Codespace creation completed with working Docker, unique SSH host keys, GitHub CLI SSH access, KVM, VirtIO networking, and the persistent checkout intact.
-- Ran **18 regression tests successfully** in the root test container. These cover resource limits and host memory use, independent storage capacity, used-image accounting, preservation and shrink refusal, nonempty disk guards, lifecycle ordering, safe reset, and expired Tailscale login.
+- Ran **21 regression tests successfully** in the root test container. These cover resource limits and host memory use, independent storage capacity, used-image accounting, preservation and shrink refusal, nonempty disk guards, lifecycle ordering, safe reset, expired Tailscale login, explicit installer bootstrap, private password files, and preservation on a failed Microsoft ISO checksum.
 - Ran the imported-UEFI watchdog regression against the pinned real runtime. The test reproduces the original rejection, accepts valid imported-disk progress after patching, preserves all known failure paths, and checks patch idempotence.
 - Parsed both PowerShell scripts and checked Bash syntax, ShellCheck, Compose configuration, and patch whitespace.
 - Imported a nonempty synthetic VHDX and compared the converted raw disk byte-for-byte. Failed replacement conversion retained the old disk.
