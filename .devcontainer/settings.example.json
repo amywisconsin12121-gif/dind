@@ -1,7 +1,8 @@
 {
   "CPU_CORES": "auto",
   "RAM_SIZE": "auto",
-  "DISK_SIZE": "keep",
+  "DISK_SIZE": "max",
+  "DISK2_SIZE": "auto",
   "DISK_CACHE": "none",
   "DISK_IO": "native"
 }

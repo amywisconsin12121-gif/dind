@@ -28,4 +28,8 @@ if ($LASTEXITCODE -ne 0) { throw 'Could not select the High performance power pl
 powercfg /change standby-timeout-ac 0
 powercfg /change monitor-timeout-ac 0
 
+# Permit NTFS TRIM so deleted files can release blocks in the sparse host image.
+fsutil behavior set DisableDeleteNotify NTFS 0
+if ($LASTEXITCODE -ne 0) { throw 'Could not enable NTFS TRIM.' }
+
 Write-Host "RDP enabled for $UserName with NLA and a password. High performance power plan selected."

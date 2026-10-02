@@ -5,7 +5,7 @@ vm_lock
 preflight
 ensure_docker
 if [[ $(docker inspect --format '{{.State.Running}}' windows 2>/dev/null || true) == true ]]; then
-    if [[ $(docker inspect --format '{{index .Config.Labels "com.windows-dind.config"}}' windows) == 2 && -s "$compose_file" ]]; then
+    if [[ $(docker inspect --format '{{index .Config.Labels "com.windows-dind.config"}}' windows) == 3 && -s "$compose_file" ]]; then
         touch "$storage/.autostart"
         echo 'Windows is already running. Use restart to apply resource changes.'
         show_access
@@ -15,7 +15,7 @@ if [[ $(docker inspect --format '{{.State.Running}}' windows 2>/dev/null || true
     docker stop --time 120 windows
 fi
 bash "$workspace/.devcontainer/prepare-image.sh"
-configure
+prepare_vm
 # up creates missing containers and reconciles changed resource allocations.
 compose up --detach --remove-orphans
 touch "$storage/.autostart"

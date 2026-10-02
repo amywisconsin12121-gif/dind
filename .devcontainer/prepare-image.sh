@@ -26,7 +26,7 @@ fi
 if [[ -z "$source_image" ]]; then
     available=$(df --output=avail --block-size=1 "$cache" | tail -n 1)
     cached=$(du --bytes --summarize "$cache" | cut -f 1)
-    ((available + cached >= 6 * 1024 * 1024 * 1024)) || fail 'At least 6 GiB of staging space is required before downloading Windows. Set WINDOWS_IMAGE_CACHE to a larger filesystem.'
+    ((available + cached >= 19 * 1024 * 1024 * 1024)) || fail 'At least 19 GiB of staging capacity is required for this Windows release. Set WINDOWS_IMAGE_CACHE to a larger disk-backed filesystem or free scratch space.'
     release=https://github.com/ItzLevvie/artifacts/releases/download/29599-1
     while read -r digest filename; do
         [[ -n "$digest" ]] || continue

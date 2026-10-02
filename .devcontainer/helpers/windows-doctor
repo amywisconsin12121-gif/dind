@@ -3,7 +3,11 @@ set -Eeuo pipefail
 source "${WINDOWS_WORKSPACE:-$(cat /usr/local/lib/windows-dind/workspace)}/.devcontainer/helpers/common.sh"
 python3 "$workspace/.devcontainer/windows-config.py" --resources
 python3 "$workspace/.devcontainer/windows-config.py" --check-kvm || true
-df -h "$storage" /tmp
+python3 "$workspace/.devcontainer/windows-config.py" --storage
+if [[ -s "$storage/storage.json" ]]; then
+    echo 'Storage plan at the most recent VM start:'
+    cat "$storage/storage.json"
+fi
 
 if docker info >/dev/null 2>&1 && [[ -s "$compose_file" ]]; then
     compose ps --all

@@ -28,6 +28,11 @@
     "remoteUser": "root",
     "workspaceMount": "source=${localWorkspaceFolder},target=/workspaces/github,type=bind,consistency=cached",
     "workspaceFolder": "/workspaces/github",
+    "hostRequirements": {
+        "cpus": 4,
+        "memory": "16gb",
+        "storage": "32gb"
+    },
     "onCreateCommand": "bash .devcontainer/onCreateCommand.sh",
     "postStartCommand": "bash .devcontainer/postStartCommand.sh",
     "waitFor": "postStartCommand"

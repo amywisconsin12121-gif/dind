@@ -46,6 +46,12 @@ ensure_docker() {
 }
 
 configure() { python3 "$workspace/.devcontainer/windows-config.py"; }
+prepare_vm() {
+    # Pull before measuring the final disk budget: images may share /tmp's disk.
+    python3 "$workspace/.devcontainer/windows-config.py" --quiet
+    compose pull --policy missing windows
+    configure
+}
 preflight() { python3 "$workspace/.devcontainer/windows-config.py" --check-kvm; }
 compose() { docker compose --project-name windows --file "$compose_file" "$@"; }
 

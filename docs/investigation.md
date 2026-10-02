@@ -22,16 +22,27 @@ The investigation used public upstream `ItzLevvie/dind` commit `76c6eb0034806439
 
 - Downloaded all five actual release 29599-1 archives, totaling **4,421,755,822 bytes**, and verified every published SHA-256 digest. The current release files are intact; no missing-release failure was found.
 - Read the real archive directory: it contains `data.vhdx`, **14,701,035,520 bytes** (approximately 13.69 GiB). Archives plus extraction alone need approximately 17.81 GiB before conversion; staging checks include additional headroom.
-- Read the VHDX's virtual-disk-size metadata from its header: **137,438,953,472 bytes (128 GiB)**. This was metadata inspection, not a full extraction or Windows boot. `DISK_SIZE=keep` preserves that capacity.
+- Read the VHDX's virtual-disk-size metadata from its header: **137,438,953,472 bytes (128 GiB)**. This was metadata inspection, not a full extraction or Windows boot. The resource generator preserves that capacity; it is not evidence of 128 GiB of physical space.
 - Built the fixed devcontainer image successfully with TLS verification enabled. Checked installed Docker/Compose, QEMU tools, GitHub CLI, and Tailscale.
 - Started the actual Docker daemon inside a privileged test container. Calling its startup helper twice left exactly one `dockerd` process. The tested daemon selected VFS in this cloud environment; Windows storage is a bind-mounted raw image rather than a Docker image layer.
-- Ran the regression suite in the root test container: all tests passed, including CPU/memory limits, disk preservation, cached-image startup, reset ordering, and nonblocking Tailscale resume.
+- Ran the regression suite in the root test container: all 17 tests passed, including CPU/memory limits, disk preservation, cached-image startup, reset ordering, nonblocking Tailscale resume, and seven storage cases. Synthetic separate-filesystem measurements test maximum sizing, shared-device and tmpfs exclusions, used-image accounting, shrink prevention, and low-space failures. They do not measure the user's actual Codespace disk.
 - Checked real Compose behavior with a cached image and no container: `compose images` lists only its header. This corrects an earlier simulated finding; cached images alone were not established as an original startup defect. A real container test did establish that `compose restart` ignores changed configuration.
 - Imported a real synthetic VHDX with nonzero data using QEMU 10.0.13, compared the converted raw disk byte-for-byte, and verified that a failed replacement leaves the old disk unchanged. Repeated preparation kept the existing disk.
 - Validated Bash syntax and ShellCheck, the generated Compose configuration, and the Windows PowerShell script's parser syntax.
 - Checked the pinned dockur startup pipeline using a nonempty synthetic raw disk and the original boot marker. It invoked QEMU without fetching another Windows installer. This isolated test explicitly used TCG with networking disabled; the fixture contained no OS and reached UEFI's no-boot-device screen before the expected timeout. It is not a Windows boot or performance test.
+- Repeated the isolated runtime check with `/storage2` attached: dockur created the requested **2-GiB sparse raw second disk** and launched QEMU. The synthetic boot disk again contained no OS; the test used explicit TCG with networking disabled and ended at the expected timeout. The production configuration still requires KVM. Real Compose also accepted the generated configuration and skipped fetching the locally cached, pinned VM image with `pull --policy missing`.
 
 The first attempt to build the original Dockerfile hit Docker Hub HTTP 429 at the base image fetch. That is a test-environment registry limit, not evidence that the user's Codespace had the same failure. The fixed build used the public Debian image mirror, and the Windows runtime was fetched from its official GHCR publication.
+
+## Requested 4-core/16-GB capacity profile
+
+The devcontainer requests the user's maximum available 4-core/16-GB machine, with at least 32 GB of workspace storage. The VM receives all allowed vCPUs and normally up to 14 GiB RAM, retaining Linux/QEMU headroom. KVM, host CPU passthrough, and Hyper-V enlightenments remain enabled. An actual performance benchmark is still needed before claiming the fastest disk-cache mode on that machine.
+
+`DISK_SIZE=max` keeps the oversized imported boot disk and allows expansion only when physical workspace capacity supports it. `DISK2_SIZE=auto` adds a separate disk-backed scratch filesystem's usable capacity after 4 GiB of headroom, with VM image pulls completed before the final measurement. The generator uses the actual image directory's filesystem, excludes RAM-backed or shared filesystems, accounts for allocated blocks in existing images, and never shrinks them. Current physical capacity and the last generated storage plan are available through `windows-doctor`.
+
+GitHub documents that **`/tmp` is cleared on every Codespace stop or idle timeout**. The boot disk stays in persistent workspace storage. The added `Initialize-Scratch.ps1` requires an explicit disk number, checks its size against the host plan, and refuses boot/system disks and disks containing existing partitions. It was parser-checked, not executed in Windows. Scratch initialization must be repeated after the temporary image is cleared. The old upstream table's 118-GB temporary-disk figure has not been verified for this user's machine.
+
+The VM's Docker restart policy is `on-failure:3` so daemon startup does not boot it ahead of the Codespace helper's KVM/resource checks. Marked Codespace resume runs that helper and computes a new scratch budget. This behavior is based on Docker's documented restart-policy semantics and still needs a real Codespace stop/resume test.
 
 ## Validation still requiring the user's Codespace
 
@@ -47,5 +58,7 @@ To finish the investigation, provide the fork URL and restore GitHub authenticat
 - [dockur 6.05 environment variables](https://github.com/dockur/windows/blob/v6.05/docs/environment.md) and its QEMU 7.48 initialization, CPU, disk, and network scripts.
 - [dockur's recent Codespaces disk minimum fix](https://github.com/dockur/windows/pull/2214)
 - [GitHub Codespaces overview and machine capacities](https://docs.github.com/en/codespaces/overview)
+- [Codespaces temporary-file lifecycle](https://docs.github.com/en/codespaces/developing-in-a-codespace/persisting-environment-variables-and-temporary-files)
+- [Docker restart-policy behavior](https://docs.docker.com/engine/containers/start-containers-automatically/)
 - [Codespaces port forwarding](https://docs.github.com/en/codespaces/developing-in-a-codespace/forwarding-ports-in-your-codespace)
 - [Azure Dasv5](https://learn.microsoft.com/en-us/azure/virtual-machines/sizes/general-purpose/dasv5-series) and [Dasv6](https://learn.microsoft.com/en-us/azure/virtual-machines/sizes/general-purpose/dasv6-series) feature support. Azure support does not establish what an individual Codespace exposes.

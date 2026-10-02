@@ -8,13 +8,13 @@ It is based on the [dockur/windows](https://github.com/dockur/windows) repositor
 
 ## Repaired Codespaces setup
 
-Create the Codespace from **your fork and the branch containing these fixes**. Choose the largest machine offered to your account that fits your budget. The old badge and CLI examples pointed to ItzLevvie's upstream repository, so they did not use changes in a fork.
+Create the Codespace from **your fork and the branch containing these fixes**. Choose the **4-core/16-GB machine**, the largest CPU/RAM configuration available to this account, with the most storage offered at that size. The old badge and CLI examples pointed to ItzLevvie's upstream repository, so they did not use changes in a fork.
 
 Once the terminal opens, run `start`. This checks working KVM acceleration, downloads and verifies ItzLevvie's existing image if needed, and boots Windows in the background. Open forwarded port **8006** to finish Windows setup. Then run `start-tailscale` and sign in; use the displayed Tailscale IPv4 address in your Remote Desktop client.
 
 For passwords, Windows RDP configuration, an alternative local TCP tunnel, performance settings, and recovery instructions, see [the setup guide](docs/codespaces-setup.md). Run `windows-doctor` to collect VM, KVM, storage, and RDP diagnostics. [The investigation report](docs/investigation.md) explains the original failures and exactly what was tested.
 
-Windows data stays in `windows/` across devcontainer rebuilds. A VM that was running resumes when the Codespace starts; `stop` disables that automatic resume. The first image import needs about **19 GiB of staging space** plus space for the sparse raw disk in the workspace. The script checks both filesystems before proceeding.
+Windows data stays in `windows/` across devcontainer rebuilds. A VM that was running resumes when the Codespace starts; `stop` disables that automatic resume. The first image import needs about **19 GiB of staging space** plus space for the sparse raw disk in the workspace. The script checks both filesystems before proceeding. It also exposes the maximum usable space on a separate disk-backed `/tmp` filesystem as a scratch drive, leaving host headroom. **Scratch contents are deleted when the Codespace stops or times out.** The boot disk remains in the workspace.
 
 > [!CAUTION]
 > This repository should be used for development and testing purposes only. <br>
@@ -66,51 +66,17 @@ Select your fork, the repaired branch, and your desired machine size.
 
 ### Using the CLI version of GitHub (alternative)
 
-1) Install [GitHub CLI](https://github.com/cli/cli/releases/latest)
-2) Type `gh codespace create --idle-timeout 4h --retention-period 720h --repo YOUR_GITHUB_USERNAME/dind --branch YOUR_FIXED_BRANCH --machine standardLinux32gb` in Command Prompt or PowerShell. Replace the repository and branch with your fork and repaired branch.
-3) This will allow you to create the GitHub Codespaces based on the files from this repository:
-    ```
-    C:\Users\codespaces>gh codespace create --idle-timeout 4h --retention-period 720h --repo ItzLevvie/dind --machine xLargePremiumLinux
-      ✓ Codespaces usage for this repository is paid for by microsoft
-    congenial-goldfish-5ggv6rrqpx7c7pj
-    ```
-4) Type `gh codespace view --repo ItzLevvie/dind --json billableOwner,createdAt,devcontainerPath,displayName,environmentId,idleTimeoutMinutes,lastUsedAt,location,machineDisplayName,machineName,name,owner,prebuild,repository,retentionExpiresAt,retentionPeriodDays,state` in Command Prompt or PowerShell.
-5) This will allow you to see the status of your GitHub Codespaces:
-    ```
-    C:\Users\codespaces>gh codespace view --repo ItzLevvie/dind --json billableOwner,createdAt,devcontainerPath,displayName,environmentId,idleTimeoutMinutes,lastUsedAt,location,machineDisplayName,machineName,name,owner,prebuild,repository,retentionExpiresAt,retentionPeriodDays,state
-    ? Choose codespace: ItzLevvie/dind [main]: congenial goldfish
-    {
-      "billableOwner": {
-        "login": "microsoft",
-        "type": "Organization"
-      },
-      "createdAt": "2025-03-25T18:29:21+00:00",
-      "devcontainerPath": ".devcontainer/devcontainer.json",
-      "displayName": "congenial goldfish",
-      "environmentId": "b1f7729a-c417-47cd-a4ce-811cf3952b8c",
-      "idleTimeoutMinutes": 240,
-      "lastUsedAt": "2025-03-25T18:29:21+00:00",
-      "location": "UkSouth",
-      "machineDisplayName": "32 cores, 128 GB RAM, 128 GB storage",
-      "machineName": "xLargePremiumLinux",
-      "name": "congenial-goldfish-5ggv6rrqpx7c7pj",
-      "owner": "ItzLevvie",
-      "prebuild": false,
-      "repository": "ItzLevvie/dind",
-      "retentionExpiresAt": "",
-      "retentionPeriodDays": 30,
-      "state": "Available"
-    }
-    ```
-6) When it says `"state": "Available"` — you can access your GitHub Codespaces at [GitHub Codespaces — Dashboard](https://github.com/codespaces):
-    ![Image](https://github.com/user-attachments/assets/eab700ae-18d1-4d3b-9c74-932b5bf8ab79)
+Install [GitHub CLI](https://github.com/cli/cli/releases/latest), authenticate, and list the 4-core machines offered for your fork:
 
-> [!NOTE]
-> See [Commands](#commands) for a full list of available commands.
+```sh
+gh api repos/YOUR_GITHUB_USERNAME/dind/codespaces/machines --jq '.machines | map(select(.cpus == 4)) | sort_by(.storage_in_bytes) | reverse | .[] | {name, cpus, memory_in_bytes, storage_in_bytes}'
+gh codespace create --repo YOUR_GITHUB_USERNAME/dind --branch YOUR_FIXED_BRANCH --machine standardLinux32gb
+gh codespace list --repo YOUR_GITHUB_USERNAME/dind
+```
 
----
+Use the name of the offered 4-core/16-GB machine with the largest storage allocation if it differs from `standardLinux32gb`. Replace the repository and branch with your fork and repaired branch.
 
-### Commands
+## Commands
 
 This repository contains a few helper scripts[^3] to get you started.
 
@@ -149,27 +115,11 @@ This repository was also inspired by many different websites:
 
 ### What machine types are available for GitHub Codespaces?
 
-GitHub Codespaces has many different machine types which you can choose based on your needs.
+This account's maximum is **4 cores and 16 GB RAM**. The repaired devcontainer requests that size and normally gives Windows all 4 vCPUs and up to 14 GiB RAM, leaving room for Linux and QEMU.
 
-It uses the [AMD EPYC™ 7763](https://www.amd.com/en/products/processors/server/epyc/7003-series/amd-epyc-7763.html) (Milan) CPU which delivers the best performance as seen in [Performance Benchmarks of Cloud Machines (December 2023)](https://bas.codes/posts/cloudbench2312).
+Use `gh api repos/YOUR_GITHUB_USERNAME/dind/codespaces/machines` to check the storage allocation actually offered at that size. The usual `standardLinux32gb` allocation is 32 GB of persistent workspace storage. `/tmp` capacity varies by host; inspect `windows-doctor` rather than assuming the old upstream 118-GB figure applies.
 
-> [!NOTE]
-> As of 2026, your GitHub Codespaces may use the [AMD EPYC™ 9V74](https://learn.microsoft.com/en-us/azure/virtual-machines/sizes/general-purpose/dasv6-series) (Genoa) CPU in some regions or machine types.
-
-Previously, GitHub Codespaces used [Intel® Xeon® Platinum 8370C](https://azure.microsoft.com/en-us/blog/upgrade-your-infrastructure-with-the-latest-dv5ev5-azure-vms-in-preview/) (Ice Lake), [Intel® Xeon® Platinum 8272CL](https://azure.microsoft.com/en-us/blog/new-general-purpose-and-memoryoptimized-azure-virtual-machines-with-intel-now-available/) (Cascade Lake), and [Intel® Xeon® Platinum 8168](https://azure.microsoft.com/en-us/blog/fv2-vms-are-now-available-the-fastest-vms-on-azure/) (Skylake) CPUs.
-
-Below are the different machine types available for your GitHub Codespaces:
-
-| Machine Type | Core | RAM | Storage <br> (`/workspaces`) | Storage <br> (`/tmp`) | Price |
-| :-: | :-: | :-: | :-: | :-: | :-: |
-| basicLinux32gb | 2 cores <br> (1 core / 2 threads) | 8 GB | 32 GB | 44 GB | $0.18 per hour |
-| standardLinux32gb | 4 cores <br> (2 cores / 4 threads) | 16 GB | 32 GB | 118 GB | $0.36 per hour |
-| premiumLinux[^1] | 8 cores <br> (4 cores / 8 threads) | 32 GB | 64 GB | 265 GB | $0.72 per hour |
-| largePremiumLinux[^1] | 16 cores <br> (8 cores / 16 threads) | 64 GB | 128 GB | 560 GB | $1.44 per hour |
-| xLargePremiumLinux[^1][^2] | 32 cores <br> (16 cores / 32 threads) | 128 GB | 128 GB | 1.2 TB | $2.88 per hour |
-
-[^1]: Contact [GitHub Support](https://support.github.com/) to access these machine types.
-[^2]: This machine type is not available as of February 2025.
+The repair uses actual filesystem measurements for its additional scratch disk and requires functional KVM. It cannot increase GitHub's physical disk allocation or supply KVM if the host does not expose it. See the [performance and storage guide](docs/codespaces-setup.md).
 
 ---
 

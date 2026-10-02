@@ -6,7 +6,7 @@ require_config
 preflight
 ensure_docker
 compose stop --timeout 120
-configure
+prepare_vm
 compose up --detach --remove-orphans
 touch "$storage/.autostart"
 show_access

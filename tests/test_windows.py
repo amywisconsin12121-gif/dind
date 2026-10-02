@@ -63,6 +63,108 @@ class ResourceTests(unittest.TestCase):
             self.assertEqual(env["DEBUG"], "N")
 
 
+class StorageTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory(prefix="storage with spaces ")
+        self.root = Path(self.temp.name)
+        self.workspace = self.root / "workspace"
+        self.storage = self.workspace / "windows"
+        self.storage.mkdir(parents=True)
+        self.scratch = self.root / "scratch"
+        with (self.storage / "data.img").open("wb") as disk:
+            disk.truncate(128 * config.GIB)
+        self.primary = {"type": "ext4", "device": 1, "fsid": 1,
+                        "total_bytes": 32 * config.GIB, "available_bytes": 18 * config.GIB}
+        self.secondary = {"type": "ext4", "device": 2, "fsid": 2,
+                          "total_bytes": 118 * config.GIB, "available_bytes": 117 * config.GIB}
+
+    def tearDown(self):
+        self.temp.cleanup()
+
+    def generate(self, **settings):
+        settings = {"SCRATCH_DIR": str(self.scratch), **settings}
+        (self.storage / "settings.json").write_text(json.dumps(settings))
+
+        def probe(path):
+            facts = self.primary if path == self.storage else self.secondary
+            return {**facts, "path": str(path)}
+
+        with patch.dict(os.environ, {}, clear=True), patch.object(config, "filesystem", side_effect=probe):
+            return config.generate(self.workspace, {"cpus": 4, "ram_mib": 14336}, quiet=True)
+
+    def test_maximum_scratch_uses_real_free_space_and_preserves_large_boot_disk(self):
+        service = self.generate()["services"]["windows"]
+        self.assertEqual(service["environment"]["DISK2_SIZE"], "115712M")
+        self.assertEqual(service["environment"]["DISK_SIZE"], "131072M")
+        self.assertIn(f"{self.scratch}:/storage2", service["volumes"])
+        plan = json.loads((self.storage / "storage.json").read_text())
+        self.assertTrue(plan["workspace"]["overcommitted"])
+        self.assertEqual(plan["workspace"]["growth_budget_bytes"], 16 * config.GIB)
+        self.assertTrue(plan["scratch"]["enabled"])
+        self.assertFalse(plan["scratch"]["overcommitted"])
+
+    def test_shared_and_memory_backed_filesystems_do_not_create_extra_capacity(self):
+        for changes in ({"device": 1}, {"fsid": 1}, {"type": "tmpfs"}, {"type": "ramfs"}):
+            with self.subTest(changes=changes):
+                original = self.secondary.copy()
+                self.secondary.update(changes)
+                service = self.generate()["services"]["windows"]
+                self.assertNotIn("DISK2_SIZE", service["environment"])
+                self.assertFalse(json.loads((self.storage / "storage.json").read_text())["scratch"]["enabled"])
+                self.secondary = original
+
+    def test_used_scratch_disk_is_preserved_when_host_free_space_falls(self):
+        self.scratch.mkdir()
+        disk = self.scratch / "data2.img"
+        with disk.open("wb") as image:
+            image.write(b"scratch data to preserve")
+            image.truncate(110 * config.GIB)
+        self.secondary["available_bytes"] = 41 * config.GIB
+        service = self.generate()["services"]["windows"]
+        self.assertEqual(service["environment"]["DISK2_SIZE"], "112640M")
+        self.assertTrue(json.loads((self.storage / "storage.json").read_text())["scratch"]["overcommitted"])
+        with disk.open("rb") as image:
+            self.assertEqual(image.read(24), b"scratch data to preserve")
+        with self.assertRaisesRegex(ValueError, "cannot shrink"):
+            self.generate(DISK2_SIZE="32G")
+
+    def test_scratch_budget_counts_existing_allocated_data(self):
+        self.scratch.mkdir()
+        disk = self.scratch / "data2.img"
+        with disk.open("wb") as image:
+            image.truncate(32 * config.GIB)
+        self.secondary["available_bytes"] = 41 * config.GIB
+        with patch.object(config, "allocated_bytes", side_effect=lambda path: 20 * config.GIB if path == disk else 0):
+            service = self.generate()["services"]["windows"]
+        # 20 GiB already in the image + 41 GiB free - 4 GiB for the host.
+        self.assertEqual(service["environment"]["DISK2_SIZE"], "58368M")
+
+    def test_nearly_full_existing_scratch_disk_fails_without_modifying_it(self):
+        self.scratch.mkdir()
+        disk = self.scratch / "data2.img"
+        disk.write_bytes(b"existing scratch data")
+        self.secondary["available_bytes"] = 512 * config.MIB
+        with self.assertRaisesRegex(ValueError, "Less than 1 GiB"):
+            self.generate()
+        self.assertEqual(disk.read_bytes(), b"existing scratch data")
+
+    def test_rejects_expansion_above_physical_capacity_and_low_workspace_space(self):
+        for settings in ({"DISK_SIZE": "256G"}, {"DISK2_SIZE": "128G"}):
+            with self.subTest(settings=settings), self.assertRaisesRegex(ValueError, "physical capacity"):
+                self.generate(**settings)
+        self.primary["available_bytes"] = config.GIB
+        with self.assertRaisesRegex(ValueError, "Less than 2 GiB"):
+            self.generate()
+
+    def test_small_temporary_disk_and_explicit_off_keep_only_the_boot_disk(self):
+        service = self.generate(DISK2_SIZE="off")["services"]["windows"]
+        self.assertNotIn("DISK2_SIZE", service["environment"])
+        self.secondary["available_bytes"] = 4 * config.GIB + 512 * config.MIB
+        service = self.generate()["services"]["windows"]
+        self.assertNotIn("DISK2_SIZE", service["environment"])
+        self.assertFalse(self.scratch.exists())
+
+
 class LifecycleTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory(prefix="dind regression ")
@@ -132,7 +234,7 @@ esac
         self.tool("docker", '''printf '%s\\n' "$*" >> "$CALL_LOG"
 case "$*" in
   *State.Running*) echo true;;
-  *com.windows-dind.config*) echo 2;;
+  *com.windows-dind.config*) echo 3;;
 esac
 ''')
         result = self.run_helper("start")
