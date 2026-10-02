@@ -17,7 +17,7 @@ GitHub's machines API offered only 2-core/8-GB and 4-core/16-GB configurations, 
 | Windows boot disk | 128 GiB virtual sparse raw image. This does not supply 128 GiB persistent physical storage; monitor the host's actual free space. |
 | Original guest OS | Windows 11 Enterprise Insider Preview, build 29599.1000, using the author's release 29599-1. Its kernel expiration was **2026-08-11 18:09:44 UTC**, before the test date; Windows displayed an expired-build notification. |
 | Replacement | Verified Microsoft Windows 11 Pro 25H2 media, SHA-256 `d141f6030fed50f75e2b03e1eb2e53646c4b21e5386047cb860af5223f102a32`; guest kernel build 26200 reports **SystemExpirationDate = 0**, with no expiration timestamp. Native NLA RDP authenticated to its desktop. |
-| Activation | The upstream image reports Windows license status 5 (activation notification), with no remaining grace period. The repair does not activate Windows; use your own valid license. |
+| Activation | Both tested installations report Windows license status 5 (activation notification), with no remaining grace period. Windows Pro requires your own valid license. |
 | Windows configuration | High performance power plan, AC sleep disabled, TRIM enabled, firewall enabled on all profiles, RDP service running, NLA required, password authentication. |
 | Native RDP | Authenticated full desktop sessions over an authenticated GitHub CLI TCP tunnel, including a fresh sign-in. FreeRDP was forced to NLA with the server certificate fingerprint pinned and independently confirmed inside Windows. RDP drive redirection works. |
 
@@ -49,7 +49,9 @@ At the repaired 12,596-MiB allocation, a four-worker SHA-256 workload completed 
 
 ## Codespace stop/resume
 
-Windows stopped gracefully before the full GitHub Codespace stop. GitHub took approximately six minutes to finish that operation. The same Codespace resumed and its lifecycle helper automatically booted the existing Windows installation. The Windows disk, account credentials, persistent helper scripts, saved benchmark, and persistent test marker survived. The `/tmp` marker was absent and its filesystem ID changed, confirming temporary storage was cleared. The helper created a new blank scratch disk at its measured maximum, **106.19 GiB**, and recomputed RAM to **12,625 MiB (12.33 GiB)**. Native NLA RDP authenticated successfully after recovery.
+The original imported preview stopped gracefully before the first full GitHub Codespace stop. GitHub took approximately six minutes to finish that operation. The same Codespace resumed and its lifecycle helper automatically booted the existing Windows installation. The Windows disk, account credentials, persistent helper scripts, saved benchmark, and persistent test marker survived. The `/tmp` marker was absent and its filesystem ID changed, confirming temporary storage was cleared. The helper created a new blank scratch disk at its measured maximum, **106.19 GiB**, and recomputed RAM to **12,625 MiB (12.33 GiB)**. Native NLA RDP authenticated successfully after recovery.
+
+The replacement Windows 11 Pro installation then passed a separate full Codespace stop/resume. Its RDP certificate and password survived, and a pinned-certificate NLA desktop login succeeded after the restart. The helper automatically restored real KVM, four CPUs, **12,627 MiB RAM (12.33 GiB)**, and a fresh **106.16-GiB temporary disk**. The persistent filesystem now has approximately 18.17 GiB free before the 2-GiB host reserve.
 
 ## Verification
 
