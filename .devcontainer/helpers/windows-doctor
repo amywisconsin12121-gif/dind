@@ -13,7 +13,8 @@ if docker info >/dev/null 2>&1 && [[ -s "$compose_file" ]]; then
     compose ps --all
     compose logs --tail 40 windows
     if [[ $(docker inspect --format '{{.State.Running}}' windows 2>/dev/null) == true ]]; then
-        docker exec windows sh -c 'pgrep -a qemu-system || true'
+        # QEMU sets its process name to "windows"; pgrep qemu-system misses it.
+        docker exec windows sh -c 'if test -r /run/shm/qemu.pid; then ps -p "$(cat /run/shm/qemu.pid)" -o pid,args; fi'
         docker exec windows python3 -c '
 from pathlib import Path
 import socket

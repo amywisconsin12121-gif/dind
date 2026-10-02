@@ -81,7 +81,10 @@ def resources(cgroup_root=Path("/sys/fs/cgroup"), meminfo=Path("/proc/meminfo"))
             cpus = min(cpus, max(1, math.ceil(quota / period)))
     except (OSError, ValueError, ZeroDivisionError):
         pass
-    budget = min(total - max(2 * GIB, total // 10), available - 512 * MIB)
+    # Reserve genuinely available memory in addition to the host's current use.
+    # Codespaces can terminate high-memory processes before a kernel OOM event.
+    reserve = max(2 * GIB, total // 10)
+    budget = min(total, available) - reserve
     return {"cpus": cpus, "total": total, "available": available, "ram_mib": budget // MIB}
 
 
@@ -271,14 +274,14 @@ def generate(workspace, limits, quiet=False):
         volumes.append(f"{scratch}:/storage2")
     config = {"services": {"windows": {
         "container_name": "windows", "image": setting("WINDOWS_IMAGE", IMAGE),
-        "labels": {"com.windows-dind.config": "4"},
+        "labels": {"com.windows-dind.config": "5"},
         "entrypoint": ["/usr/bin/tini", "-s", "/bin/bash", "/usr/local/lib/windows-dind/entry.sh"],
         "environment": environment,
         "ports": ["3389:3389/tcp", "3389:3389/udp", "127.0.0.1:8006:8006/tcp"],
         "devices": devices, "cap_add": ["NET_ADMIN"],
         "volumes": volumes,
         # Codespace resume must run our KVM/resource probes before booting.
-        "restart": "on-failure:3", "stop_grace_period": "2m",
+        "restart": "no", "stop_grace_period": "2m",
     }}}
     temp = storage / "windows.yaml.new"
     temp.write_text(json.dumps(config, indent=2) + "\n")

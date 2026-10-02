@@ -30,7 +30,7 @@ class ResourceTests(unittest.TestCase):
                 limits = config.resources(root, meminfo)
             self.assertEqual(limits["cpus"], 4)
             self.assertEqual(limits["total"], 16 * config.GIB)
-            self.assertEqual(limits["ram_mib"], 14 * 1024)
+            self.assertEqual(limits["ram_mib"], 13 * 1024)
 
     def test_memory_limit_still_applies_without_optional_memory_stat(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -39,7 +39,16 @@ class ResourceTests(unittest.TestCase):
             (root / "memory.current").write_text(str(config.GIB))
             meminfo = root / "meminfo"
             meminfo.write_text("MemTotal: 134217728 kB\nMemAvailable: 125829120 kB\n")
-            self.assertEqual(config.resources(root, meminfo)["ram_mib"], 6 * 1024)
+            self.assertEqual(config.resources(root, meminfo)["ram_mib"], 5 * 1024)
+
+    def test_memory_reserve_is_left_after_existing_host_processes(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            meminfo = root / "meminfo"
+            meminfo.write_text("MemTotal: 16777216 kB\nMemAvailable: 15204352 kB\n")
+            limits = config.resources(root, meminfo)
+            # 16 GiB total, 1.5 GiB already used, and 2 GiB still available to Linux.
+            self.assertEqual(limits["ram_mib"], 12800)
 
     def test_config_rejects_overcommit_and_disk_shrink(self):
         with tempfile.TemporaryDirectory(prefix="workspace with spaces ") as directory:
@@ -234,7 +243,7 @@ esac
         self.tool("docker", '''printf '%s\\n' "$*" >> "$CALL_LOG"
 case "$*" in
   *State.Running*) echo true;;
-  *com.windows-dind.config*) echo 4;;
+  *com.windows-dind.config*) echo 5;;
 esac
 ''')
         result = self.run_helper("start")

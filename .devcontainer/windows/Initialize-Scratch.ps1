@@ -7,16 +7,18 @@ param(
     [ValidateRange(1, 255)]
     [int]$DiskNumber,
     [ValidatePattern('^[D-Zd-z]$')]
-    [string]$DriveLetter = 'S'
+    [string]$DriveLetter = 'S',
+    [string]$PlanPath = '\\host.lan\Data\windows\storage.json'
 )
 $ErrorActionPreference = 'Stop'
-$plan = Get-Content '\\host.lan\Data\windows\storage.json' -Raw | ConvertFrom-Json
+$plan = Get-Content $PlanPath -Raw | ConvertFrom-Json
 if (-not $plan.scratch.enabled) { throw 'The host storage plan has no enabled scratch disk.' }
 $disk = Get-Disk -Number $DiskNumber
 if ($disk.IsBoot -or $disk.IsSystem -or $disk.PartitionStyle -ne 'RAW') {
     throw 'Only a blank, non-boot, non-system disk can be initialized. Existing partitions are preserved.'
 }
-if ($disk.BusType -ne 'SCSI' -or $disk.Size -ne $plan.scratch.virtual_bytes) {
+# The VirtIO SCSI driver reports SAS on the tested Windows image.
+if ($disk.BusType -notin @('SCSI', 'SAS') -or $disk.Size -ne $plan.scratch.virtual_bytes) {
     throw 'The selected disk does not match the configured VirtIO SCSI scratch disk size.'
 }
 if (Get-Volume -DriveLetter $DriveLetter -ErrorAction SilentlyContinue) {
