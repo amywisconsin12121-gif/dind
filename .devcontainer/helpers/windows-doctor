@@ -15,8 +15,9 @@ if docker info >/dev/null 2>&1 && [[ -s "$compose_file" ]]; then
     if [[ $(docker inspect --format '{{.State.Running}}' windows 2>/dev/null) == true ]]; then
         docker exec windows sh -c 'pgrep -a qemu-system || true'
         docker exec windows python3 -c '
-import os,socket
-host=os.environ.get("IP", "20.20.20.21")
+from pathlib import Path
+import socket
+host=Path("/run/shm/qemu.ip").read_text().strip()
 try:
     with socket.create_connection((host,3389), timeout=3):
         print("Guest RDP TCP listener is reachable; a client login is still needed to validate authentication.")

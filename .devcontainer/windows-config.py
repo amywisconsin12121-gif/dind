@@ -260,14 +260,18 @@ def generate(workspace, limits, quiet=False):
     devices = ["/dev/kvm", "/dev/net/tun"]
     if Path("/dev/vhost-net").exists():
         devices.append("/dev/vhost-net")
-    volumes = [f"{storage}:/storage", f"{workspace}:/data"]
+    runtime = workspace / ".devcontainer/runtime"
+    volumes = [f"{storage}:/storage", f"{workspace}:/data",
+               f"{runtime / 'entry.sh'}:/usr/local/lib/windows-dind/entry.sh:ro",
+               f"{runtime / 'patch-boot.py'}:/usr/local/lib/windows-dind/patch-boot.py:ro"]
     if secondary_size:
         scratch.mkdir(parents=True, exist_ok=True, mode=0o700)
         environment["DISK2_SIZE"] = secondary_size
         volumes.append(f"{scratch}:/storage2")
     config = {"services": {"windows": {
         "container_name": "windows", "image": setting("WINDOWS_IMAGE", IMAGE),
-        "labels": {"com.windows-dind.config": "3"},
+        "labels": {"com.windows-dind.config": "4"},
+        "entrypoint": ["/usr/bin/tini", "-s", "/bin/bash", "/usr/local/lib/windows-dind/entry.sh"],
         "environment": environment,
         "ports": ["3389:3389/tcp", "3389:3389/udp", "127.0.0.1:8006:8006/tcp"],
         "devices": devices, "cap_add": ["NET_ADMIN"],

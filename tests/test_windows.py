@@ -234,7 +234,7 @@ esac
         self.tool("docker", '''printf '%s\\n' "$*" >> "$CALL_LOG"
 case "$*" in
   *State.Running*) echo true;;
-  *com.windows-dind.config*) echo 3;;
+  *com.windows-dind.config*) echo 4;;
 esac
 ''')
         result = self.run_helper("start")
