@@ -16,6 +16,7 @@ GitHub's machines API offered only 2-core/8-GB and 4-core/16-GB configurations, 
 | Added scratch disk | Initially **104.59 GiB**, formatted as NTFS `S:` and load-tested. After the verified Codespace stop/resume cleared `/tmp`, the newly measured maximum was 114,025,299,968 bytes, **106.19 GiB**, with 4 GiB host headroom; it was initialized again as NTFS `S:`. |
 | Windows boot disk | 128 GiB virtual sparse raw image. This does not supply 128 GiB persistent physical storage; monitor the host's actual free space. |
 | Guest OS | Windows 11 Enterprise Insider Preview, build 29599.1000, using the author's release 29599-1. |
+| Activation | The upstream image reports Windows license status 5 (activation notification), with no remaining grace period. |
 | Windows configuration | High performance power plan, AC sleep disabled, TRIM enabled, firewall enabled on all profiles, RDP service running, NLA required, password authentication. |
 | Native RDP | Authenticated full desktop sessions over an authenticated GitHub CLI TCP tunnel, including a fresh sign-in. FreeRDP was forced to NLA with the server certificate fingerprint pinned and independently confirmed inside Windows. RDP drive redirection works. |
 
