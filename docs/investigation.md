@@ -13,7 +13,7 @@ GitHub's machines API offered only 2-core/8-GB and 4-core/16-GB configurations, 
 | Host RAM | 16,770,494,464 bytes, approximately 15.62 GiB. Guest allocation leaves capacity for Linux, Docker, QEMU overhead, the editor, and networking. |
 | Persistent filesystem | 33,636,024,320 bytes, approximately 31.32 GiB, shared by the checkout, VM disk, and Docker volume. |
 | Separate temporary filesystem | 126,225,022,976 bytes, approximately 117.56 GiB. |
-| Added scratch disk | Initially **104.59 GiB**, formatted as NTFS `S:` and load-tested. After the verified Codespace stop/resume cleared `/tmp`, the newly measured maximum was 114,025,299,968 bytes, **106.19 GiB**, with 4 GiB host headroom. |
+| Added scratch disk | Initially **104.59 GiB**, formatted as NTFS `S:` and load-tested. After the verified Codespace stop/resume cleared `/tmp`, the newly measured maximum was 114,025,299,968 bytes, **106.19 GiB**, with 4 GiB host headroom; it was initialized again as NTFS `S:`. |
 | Windows boot disk | 128 GiB virtual sparse raw image. This does not supply 128 GiB persistent physical storage; monitor the host's actual free space. |
 | Guest OS | Windows 11 Enterprise Insider Preview, build 29599.1000, using the author's release 29599-1. |
 | Windows configuration | High performance power plan, AC sleep disabled, TRIM enabled, firewall enabled on all profiles, RDP service running, NLA required, password authentication. |
