@@ -13,7 +13,7 @@ GitHub's machines API offered only 2-core/8-GB and 4-core/16-GB configurations, 
 | Host RAM | 16,770,494,464 bytes, approximately 15.62 GiB. Guest allocation leaves capacity for Linux, Docker, QEMU overhead, the editor, and networking. |
 | Persistent filesystem | 33,636,024,320 bytes, approximately 31.32 GiB, shared by the checkout, VM disk, and Docker volume. |
 | Separate temporary filesystem | 126,225,022,976 bytes, approximately 117.56 GiB. |
-| Added scratch disk | 112,299,343,872 bytes, **104.59 GiB**, measured after image import and runtime pulls, with 4 GiB host headroom. Formatted in Windows as NTFS `S:`. |
+| Added scratch disk | Initially **104.59 GiB**, formatted as NTFS `S:` and load-tested. After the verified Codespace stop/resume cleared `/tmp`, the newly measured maximum was 114,025,299,968 bytes, **106.19 GiB**, with 4 GiB host headroom. |
 | Windows boot disk | 128 GiB virtual sparse raw image. This does not supply 128 GiB persistent physical storage; monitor the host's actual free space. |
 | Guest OS | Windows 11 Enterprise Insider Preview, build 29599.1000, using the author's release 29599-1. |
 | Windows configuration | High performance power plan, AC sleep disabled, TRIM enabled, firewall enabled on all profiles, RDP service running, NLA required, password authentication. |
@@ -43,6 +43,10 @@ GitHub's machines API offered only 2-core/8-GB and 4-core/16-GB configurations, 
 ## Load test
 
 At the repaired 12,596-MiB allocation, a four-worker SHA-256 workload completed for **60.025 seconds**, processing **5.352 GiB/s** in aggregate. A subsequent **1-GiB write-through scratch-file write**, flushed to the storage device, completed in **2.348 seconds (436 MiB/s)**. Windows, RDP, and the host remained running. These are a baseline and a stability check, not a comparison of cache modes or a promise of sustained disk throughput.
+
+## Codespace stop/resume
+
+Windows stopped gracefully before the full GitHub Codespace stop. GitHub took approximately six minutes to finish that operation. The same Codespace resumed and its lifecycle helper automatically booted the existing Windows installation. The Windows disk, account credentials, persistent helper scripts, saved benchmark, and persistent test marker survived. The `/tmp` marker was absent and its filesystem ID changed, confirming temporary storage was cleared. The helper created a new blank scratch disk at its measured maximum, **106.19 GiB**, and recomputed RAM to **12,625 MiB (12.33 GiB)**. Native NLA RDP authenticated successfully after recovery.
 
 ## Verification
 
